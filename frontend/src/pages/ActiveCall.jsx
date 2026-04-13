@@ -162,11 +162,11 @@ const ActiveCall = () => {
   }, [socket, id, role]);
 
   const startNewRecording = useCallback(() => {
-    if (isMuted || isRecordingRef.current) return;
+    if (isRecordingRef.current) return;
     pcmDataRef.current = [];
     isRecordingRef.current = true;
     setIsSpeaking(true);
-  }, [isMuted]);
+  }, []);
 
   const encodeWAV = (samples, sampleRate) => {
     const buffer = new ArrayBuffer(44 + samples.length * 2);
@@ -247,6 +247,7 @@ const ActiveCall = () => {
         let lastSpeechTime = Date.now();
 
         const checkAudio = () => {
+          // Use refs to check state without restarting the effect
           if (isMuted) {
             setVolume(0);
             setIsSpeaking(false);
@@ -283,16 +284,9 @@ const ActiveCall = () => {
       }
     };
 
-    if (isMuted) {
-       setVolume(0);
-       setIsSpeaking(false);
-       if (isRecordingRef.current) stopAndSend();
-    }
-    
     initVAD();
     
     return () => {
-      console.log('[Cleanup] Stopping audio context and stream...');
       if (streamRef.current) {
         streamRef.current.getTracks().forEach(t => t.stop());
       }
@@ -300,7 +294,7 @@ const ActiveCall = () => {
         audioContextRef.current.close().catch(e => console.warn('Context close ignored:', e));
       }
     };
-  }, [isMuted, startNewRecording, stopAndSend]);
+  }, []); // Run ONCE on mount
 
   const leaveCall = () => {
     if (socket) socket.disconnect();

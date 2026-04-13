@@ -1,49 +1,43 @@
 const transcribeAudio = async (audioBase64, language) => {
-  console.log(`[STT Service] Transcribing audio in ${language}`);
-
   const apiKey = process.env.SARVAM_API_KEY;
-
   if (!apiKey || apiKey === 'your_sarvam_api_key') {
-    throw new Error('SARVAM_API_KEY is missing or invalid in .env');
+    throw new Error('SARVAM_API_KEY is missing');
   }
 
-  if (process.env.USE_MOCKS === 'true') {
-    throw new Error('USE_MOCKS is true in .env');
-  }
-
-  // Sarvam API strictly requires the '-IN' suffix (e.g., 'en-IN', 'hi-IN')
+  // Ensure format is 'xx-IN'
   const sarvamLang = language.includes('-IN') ? language : `${language}-IN`;
+  
+  console.log(`[STT] Transcribing audio in language: ${sarvamLang}, base64 length: ${audioBase64.length}`);
+
+  const audioBuffer = Buffer.from(audioBase64, 'base64');
+  const audioBlob = new Blob([audioBuffer], { type: 'audio/webm' });
+  
+  const formData = new FormData();
+  formData.append('file', audioBlob, 'audio.webm');
+  formData.append('language_code', sarvamLang);
+  formData.append('model', 'saaras:v3');
 
   const response = await fetch('https://api.sarvam.ai/speech-to-text', {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'api-subscription-key': apiKey
-    },
-    body: JSON.stringify({
-      audio_base64: audioBase64,
-      language_code: sarvamLang
-    })
+    headers: { 'api-subscription-key': apiKey },
+    body: formData
   });
 
   if (!response.ok) {
     const errText = await response.text();
+    console.error(`[STT] Sarvam Error ${response.status}:`, errText);
     throw new Error(`Sarvam STT Error: ${response.status} - ${errText}`);
   }
 
   const data = await response.json();
-  console.log('[STT Service] Full API response:', data);
+  const resultText = data.transcript !== undefined ? data.transcript : data.text;
 
-  const resultText = data.transcript || data.text;
-
-  if (!resultText) {
-    throw new Error('Sarvam STT returned no transcript text');
+  if (resultText === undefined || resultText === null) {
+    throw new Error('Sarvam STT returned no transcript');
   }
 
-  console.log(`[STT Service] Real STT Success. Result: "${resultText}"`);
+  console.log(`[STT] Transcript: "${resultText}"`);
   return resultText;
 };
 
-module.exports = {
-  transcribeAudio
-};
+module.exports = { transcribeAudio };

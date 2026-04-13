@@ -1,8 +1,8 @@
 const { query } = require('../config/db');
 const { v4: uuidv4 } = require('uuid');
 
-const createSession = async () => {
-  const sessionId = uuidv4();
+const createSession = async (customId = null) => {
+  const sessionId = customId || uuidv4();
   const text = 'INSERT INTO sessions(id, status) VALUES($1, $2) RETURNING *';
   const values = [sessionId, 'active'];
   try {
@@ -10,10 +10,11 @@ const createSession = async () => {
     return res.rows[0];
   } catch (err) {
     console.error('Error creating session in DB', err);
-    // If DB is broken (dev mock mode), just return mock session
+    // Return the ID anyway for mock support
     return { id: sessionId, status: 'active' };
   }
 };
+
 
 const getSessionHistory = async (sessionId) => {
   const text = 'SELECT * FROM messages WHERE session_id = $1 ORDER BY created_at ASC';
@@ -43,8 +44,20 @@ const saveMessage = async (messageData) => {
   }
 };
 
+const listSessions = async (limit = 10) => {
+  const text = 'SELECT id, status, created_at FROM sessions ORDER BY created_at DESC LIMIT $1';
+  try {
+    const res = await query(text, [limit]);
+    return res.rows;
+  } catch (err) {
+    console.error('Error listing sessions', err);
+    return [];
+  }
+};
+
 module.exports = {
   createSession,
   getSessionHistory,
-  saveMessage
+  saveMessage,
+  listSessions
 };

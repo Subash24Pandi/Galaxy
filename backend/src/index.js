@@ -3,51 +3,80 @@ const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
 const cors = require('cors');
-const { connectDB } = require('./config/db');
-const { connectRedis } = require('./config/redisClient');
+const { connectDB, pool } = require('./config/db');
+const { connectRedis, getRedisClient } = require('./config/redisClient');
 const sessionRoutes = require('./routes/sessionRoutes');
-const testRoutes = require('./routes/testRoutes');
 const socketHandler = require('./sockets/socketHandler');
 
 const app = express();
 const server = http.createServer(app);
 
-// Enable CORS for frontend
-app.use(cors({ origin: '*' }));
+// Relaxed CORS for local development and demos
+app.use(cors({
+  origin: '*',
+  methods: ['GET', 'POST'],
+  credentials: true
+}));
 app.use(express.json());
 
-// Initialize WebSockets
+// Routes
+app.use('/api/sessions', sessionRoutes);
+
+// Health Check
+app.get('/api/health', async (req, res) => {
+  const healthStatus = {
+    status: 'ok',
+    timestamp: new Date().toISOString(),
+    services: {
+      server: 'up',
+      database: 'down',
+      redis: 'down'
+    }
+  };
+
+  try {
+    await pool.query('SELECT 1');
+    healthStatus.services.database = 'up';
+  } catch (e) {
+    healthStatus.services.database = 'error';
+  }
+
+  try {
+    const redisClient = getRedisClient();
+    if (redisClient && redisClient.isOpen) {
+      healthStatus.services.redis = 'up';
+    }
+  } catch (e) {
+    healthStatus.services.redis = 'error';
+  }
+
+  const overallOk = Object.values(healthStatus.services).every(s => s === 'up');
+  res.status(overallOk ? 200 : 207).json(healthStatus);
+});
+
+// Initialize Socket.io with relaxed settings
 const io = new Server(server, {
   cors: {
     origin: '*',
-    methods: ['GET', 'POST']
-  }
+    methods: ['GET', 'POST'],
+    credentials: true
+  },
+  allowEIO3: true,
+  transports: ['websocket', 'polling']
 });
 
-// Setup API routes
-app.use('/api/sessions', sessionRoutes);
-app.use('/api/test', testRoutes);
-
-// Detailed health check
-app.get('/health', (req, res) => {
-  res.status(200).json({ status: 'ok', message: 'Galaxy Backend MVP is running' });
-});
-
-// Initialize connections and start server
 const startServer = async () => {
   try {
     await connectDB();
-    await connectRedis();
-
-    // Attach socket handler
+    await connectRedis(); // Will log error if fails, but won't crash
     socketHandler(io);
 
     const PORT = process.env.PORT || 5000;
-    server.listen(PORT, () => {
-      console.log(`Server listening on port ${PORT}`);
+    server.listen(PORT, '0.0.0.0', () => {
+      console.log(`[Galaxy] Server listening on port ${PORT}`);
     });
   } catch (error) {
-    console.error('Failed to start server:', error);
+    console.error('[Galaxy] Startup failed:', error);
     process.exit(1);
   }
 };

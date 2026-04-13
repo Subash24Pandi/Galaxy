@@ -1,13 +1,11 @@
 const { Pool } = require('pg');
+const fs = require('fs');
+const path = require('path');
 
-// Intelligently parse cloud URL if provided, otherwise fallback to local credentials
 const poolConfig = process.env.DATABASE_URL 
   ? {
       connectionString: process.env.DATABASE_URL,
-      // Many cloud providers (Render/Heroku/Railway) strictly require SSL
-      ssl: {
-        rejectUnauthorized: false
-      }
+      ssl: { rejectUnauthorized: false }
     }
   : {
       user: process.env.DB_USER,
@@ -21,16 +19,25 @@ const pool = new Pool(poolConfig);
 
 const connectDB = async () => {
   try {
-    await pool.query('SELECT NOW()');
+    const client = await pool.connect();
     console.log('PostgreSQL connected successfully');
+    
+    // Auto-initialize schema
+    const schemaPath = path.join(__dirname, '..', 'models', 'schema.sql');
+    if (fs.existsSync(schemaPath)) {
+      const sql = fs.readFileSync(schemaPath, 'utf8');
+      await client.query(sql);
+      console.log('Database schema initialized (Created tables if they didn\'t exist)');
+    }
+    
+    client.release();
   } catch (error) {
-    console.error('PostgreSQL connection error:', error.message);
-    // Keep it silent for now if DB isn't running to allow partial mock usage
-    console.warn('Continuing without DB connection. (Some features may fail).');
+    console.error('PostgreSQL initialization error:', error.message);
+    console.warn('Continuing without active DB persistence.');
   }
 };
 
-// Generic query wrapper
 const query = (text, params) => pool.query(text, params);
 
 module.exports = { connectDB, query, pool };
+

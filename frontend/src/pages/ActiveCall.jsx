@@ -150,7 +150,13 @@ const ActiveCall = () => {
   }, []);
 
   const encodeWAV = (samples, sampleRate) => {
-    const buffer = new ArrayBuffer(44 + samples.length * 2);
+    // 1. Resample to 16kHz if needed
+    const inputSampleRate = audioContextRef.current?.sampleRate || 44100;
+    const targetSampleRate = 16000;
+    const resampledData = downsampleBuffer(samples, inputSampleRate, targetSampleRate);
+    
+    // 2. Write WAV
+    const buffer = new ArrayBuffer(44 + resampledData.length * 2);
     const view = new DataView(buffer);
 
     const writeString = (offset, string) => {
@@ -160,26 +166,50 @@ const ActiveCall = () => {
     };
 
     writeString(0, 'RIFF');
-    view.setUint32(4, 32 + samples.length * 2, true);
+    view.setUint32(4, 32 + resampledData.length * 2, true);
     writeString(8, 'WAVE');
     writeString(12, 'fmt ');
     view.setUint32(16, 16, true);
     view.setUint16(20, 1, true);
     view.setUint16(22, 1, true);
-    view.setUint32(24, sampleRate, true);
-    view.setUint32(28, sampleRate * 2, true);
+    view.setUint32(24, targetSampleRate, true);
+    view.setUint32(28, targetSampleRate * 2, true);
     view.setUint16(32, 2, true);
     view.setUint16(34, 16, true);
     writeString(36, 'data');
-    view.setUint32(40, samples.length * 2, true);
+    view.setUint32(40, resampledData.length * 2, true);
 
     let offset = 44;
-    for (let i = 0; i < samples.length; i++, offset += 2) {
-      const s = Math.max(-1, Math.min(1, samples[i]));
+    for (let i = 0; i < resampledData.length; i++, offset += 2) {
+      const s = Math.max(-1, Math.min(1, resampledData[i]));
       view.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
     }
 
     return new Blob([buffer], { type: 'audio/wav' });
+  };
+
+  /**
+   * Helper: Professional Downsampler
+   */
+  const downsampleBuffer = (buffer, inputSampleRate, targetSampleRate) => {
+    if (inputSampleRate === targetSampleRate) return buffer;
+    const sampleRateRatio = inputSampleRate / targetSampleRate;
+    const newLength = Math.round(buffer.length / sampleRateRatio);
+    const result = new Float32Array(newLength);
+    let offsetResult = 0;
+    let offsetBuffer = 0;
+    while (offsetResult < result.length) {
+      const nextOffsetBuffer = Math.round((offsetResult + 1) * sampleRateRatio);
+      let accum = 0, count = 0;
+      for (let i = offsetBuffer; i < nextOffsetBuffer && i < buffer.length; i++) {
+        accum += buffer[i];
+        count++;
+      }
+      result[offsetResult] = accum / count;
+      offsetResult++;
+      offsetBuffer = nextOffsetBuffer;
+    }
+    return result;
   };
 
   useEffect(() => {
@@ -190,13 +220,13 @@ const ActiveCall = () => {
             echoCancellation: true,
             noiseSuppression: true,
             autoGainControl: true,
-            channelCount: 1,   // Mono is faster to process
-            sampleRate: 16000  // 16kHz is ideal for STT
+            channelCount: 1
           } 
         });
         streamRef.current = stream;
 
-        const audioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
+        // Use standard hardware sample rate instead of forcing 16kHz
+        const audioContext = new (window.AudioContext || window.webkitAudioContext)();
         const analyser = audioContext.createAnalyser();
         const source = audioContext.createMediaStreamSource(stream);
         

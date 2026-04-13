@@ -48,7 +48,7 @@ const ActiveCall = () => {
     console.log('[Socket] Connecting to:', BACKEND_URL);
     
     const newSocket = io(BACKEND_URL, { 
-      transports: ['websocket', 'polling'],
+      transports: ['websocket'],
       reconnectionAttempts: 5,
       timeout: 10000
     });

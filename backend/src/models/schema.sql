@@ -1,7 +1,20 @@
 -- SQL commands to create the necessary tables
--- MIGRATION: Ensure custom IDs work on existing UUID tables
-ALTER TABLE sessions ALTER COLUMN id TYPE VARCHAR(100);
-ALTER TABLE messages ALTER COLUMN session_id TYPE VARCHAR(100);
+-- MIGRATION: Robust conversion from UUID to VARCHAR
+DO $$ 
+BEGIN 
+    -- 1. Drop the foreign key constraint first
+    ALTER TABLE messages DROP CONSTRAINT IF EXISTS messages_session_id_fkey;
+    
+    -- 2. Change the column types
+    ALTER TABLE sessions ALTER COLUMN id TYPE VARCHAR(100);
+    ALTER TABLE messages ALTER COLUMN session_id TYPE VARCHAR(100);
+    
+    -- 3. Restore the constraint
+    ALTER TABLE messages ADD CONSTRAINT messages_session_id_fkey FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE;
+EXCEPTION
+    WHEN others THEN 
+        RAISE NOTICE 'Migration failed or already applied: %', SQLERRM;
+END $$;
 
 CREATE TABLE IF NOT EXISTS sessions (
   id VARCHAR(100) PRIMARY KEY,

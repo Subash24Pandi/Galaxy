@@ -328,17 +328,6 @@ const ActiveCall = () => {
                <span style={{ fontSize: '0.9rem', fontWeight: '600' }}>{inputLang.toUpperCase()} &rarr; {outputLang.toUpperCase()}</span>
             </div>
           )}
-          <button 
-            onClick={() => { if(isRecordingRef.current) stopAndSend(); }}
-            className="btn-primary" 
-            style={{ 
-              padding: isMobile ? '0.5rem' : '0.75rem 1.5rem', borderRadius: '12px', width: 'auto',
-              background: isSpeaking ? 'var(--accent-secondary)' : 'rgba(255,255,255,0.1)',
-              display: isSpeaking ? 'flex' : 'none'
-            }}
-          >
-            <Send size={18} /> Send Now
-          </button>
           <button onClick={leaveCall} className="btn-outline" style={{ 
             background: 'rgba(239, 68, 68, 0.1)', color: '#f87171', border: '1px solid rgba(239, 68, 68, 0.2)', 
             padding: isMobile ? '0.5rem' : '0.75rem 1.5rem', borderRadius: '12px', width: 'auto'

@@ -45,15 +45,32 @@ const ActiveCall = () => {
 
   useEffect(() => {
     const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'https://galaxy-translator.onrender.com';
-    const newSocket = io(BACKEND_URL, { transports: ['websocket', 'polling'] });
+    console.log('[Socket] Connecting to:', BACKEND_URL);
+    
+    const newSocket = io(BACKEND_URL, { 
+      transports: ['websocket', 'polling'],
+      reconnectionAttempts: 5,
+      timeout: 10000
+    });
+    
     setSocket(newSocket);
 
     newSocket.on('connect', () => {
+      console.log('[Socket] Connected!', newSocket.id);
       newSocket.emit('join_session', { sessionId: id, role, inputLang, outputLang });
       setStatus('Ready');
     });
 
-    newSocket.on('error', (err) => setStatus(`Error: ${err.message}`));
+    newSocket.on('connect_error', (err) => {
+      console.error('[Socket] Connection error:', err);
+      setStatus(`Connect Error: ${err.message}`);
+    });
+
+    newSocket.on('error', (err) => {
+      console.error('[Socket] General error:', err);
+      setStatus(`Error: ${err.message}`);
+    });
+    
     newSocket.on('session_status', (data) => setStatus(data.message));
     newSocket.on('transcript_update', (data) => setMessages((prev) => [...prev, data]));
     
@@ -64,7 +81,13 @@ const ActiveCall = () => {
       }
     });
 
-    return () => newSocket.close();
+    return () => {
+      console.log('[Socket] Disconnecting...');
+      newSocket.off('connect');
+      newSocket.off('connect_error');
+      newSocket.off('error');
+      newSocket.disconnect();
+    };
   }, [id, role, inputLang, outputLang]);
 
   const stopAndSend = useCallback(() => {
@@ -174,8 +197,13 @@ const ActiveCall = () => {
     if (!isMuted) initVAD();
     
     return () => {
-      if (streamRef.current) streamRef.current.getTracks().forEach(t => t.stop());
-      if (audioContextRef.current) audioContextRef.current.close();
+      console.log('[Cleanup] Stopping audio context and stream...');
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach(t => t.stop());
+      }
+      if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
+        audioContextRef.current.close().catch(e => console.warn('Context close ignored:', e));
+      }
     };
   }, [isMuted, startNewRecording, stopAndSend]);
 

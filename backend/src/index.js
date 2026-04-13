@@ -54,10 +54,10 @@ app.get('/api/health', async (req, res) => {
   res.status(overallOk ? 200 : 207).json(healthStatus);
 });
 
-// Initialize Socket.io with relaxed settings
+// Initialize Socket.io with more robust CORS for production
 const io = new Server(server, {
   cors: {
-    origin: '*',
+    origin: true, // Reflects the request origin, allowing credentials
     methods: ['GET', 'POST'],
     credentials: true
   },

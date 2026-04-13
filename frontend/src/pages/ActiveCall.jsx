@@ -1,7 +1,4 @@
-import React, { useEffect, useState, useRef, useCallback } from 'react';
-import { useParams, useLocation, useNavigate } from 'react-router-dom';
-import { io } from 'socket.io-client';
-import { Mic, MicOff, PhoneOff, MessageSquare, ShieldCheck, Activity, Globe } from 'lucide-react';
+import Pusher from 'pusher-js';
 
 const ActiveCall = () => {
   const { id } = useParams();
@@ -12,124 +9,100 @@ const ActiveCall = () => {
     role: 'agent', inputLang: 'en', outputLang: 'hi'
   };
 
-  const [socket, setSocket] = useState(null);
   const [status, setStatus] = useState('Connecting...');
   const [messages, setMessages] = useState([]);
-  const [isMuted, setIsMuted] = useState(false);
+  const [isMuted, setIsMuted] = useState(true); // Start muted for safety
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [volume, setVolume] = useState(0);
   const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
 
+  const pusherRef = useRef(null);
+  const channelRef = useRef(null);
   const audioContextRef = useRef(null);
   const analyserRef = useRef(null);
   const streamRef = useRef(null);
-  const pcmDataRef = useRef([]); // Stores raw PCM samples
+  const pcmDataRef = useRef([]); 
   const isRecordingRef = useRef(false);
-  const chatEndRef = useRef(null); // Fixed: Restored missing ref
-
-  useEffect(() => {
-    const handleResize = () => setIsMobile(window.innerWidth < 768);
-    window.addEventListener('resize', handleResize);
-    return () => window.removeEventListener('resize', handleResize);
-  }, []);
-
-  const scrollToBottom = () => {
-    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  };
-
-  useEffect(() => {
-    scrollToBottom();
-  }, [messages]);
+  const chatEndRef = useRef(null);
 
   useEffect(() => {
     const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'https://galaxy-translator.onrender.com';
-    console.log('[Socket] Connecting to:', BACKEND_URL);
     
-    const newSocket = io(BACKEND_URL, { 
-      transports: ['websocket', 'polling'],
-      reconnectionAttempts: 10,
-      timeout: 20000
+    // 1. Initialize Pusher
+    const pusher = new Pusher(import.meta.env.VITE_PUSHER_KEY, {
+      cluster: import.meta.env.VITE_PUSHER_CLUSTER,
     });
-    
-    setSocket(newSocket);
+    pusherRef.current = pusher;
 
-    newSocket.on('connect', () => {
-      console.log('[Socket] Connected!', newSocket.id);
-      newSocket.emit('join_session', { sessionId: id, role, inputLang, outputLang });
-      setStatus('Ready');
-    });
+    const channel = pusher.subscribe(`session-${id}`);
+    channelRef.current = channel;
 
-    newSocket.on('connect_error', (err) => {
-      console.error('[Socket] Connection error:', err);
-      // Stringify the error object so it's readable in the UI
-      const errDetail = typeof err === 'object' ? JSON.stringify(err) : String(err);
-      setStatus(`Connect Error: ${errDetail}`);
-    });
-
-    newSocket.on('error', (err) => {
-      console.error('[Socket] General error:', err);
-      const errDetail = err?.message || JSON.stringify(err);
-      setStatus(`Error: ${errDetail}`);
-    });
-    
-    newSocket.on('session_status', (data) => setStatus(data.message));
-    newSocket.on('transcript_update', (data) => setMessages((prev) => [...prev, data]));
-    
-    newSocket.on('audio_playback', (data) => {
+    // 2. Listen for Events
+    channel.bind('session_status', (data) => setStatus(data.message));
+    channel.bind('transcript_update', (data) => setMessages((prev) => [...prev, data]));
+    channel.bind('audio_playback', (data) => {
       if (data.targetRole === role && data.audioBase64) {
         playAudio(data.audioBase64);
       }
     });
 
+    // 3. Notify Join via HTTP
+    fetch(`${BACKEND_URL}/api/join`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sessionId: id, role })
+    }).then(() => setStatus('Ready'));
+
     const playAudio = (base64) => {
       try {
         const audio = new Audio(`data:audio/wav;base64,${base64}`);
         audio.play().catch(() => {
-          // Fallback if browser blocks auto-play
           new Audio(`data:audio/wav;base64,${base64}`).play().catch(() => {});
         });
       } catch (e) {}
     };
 
     return () => {
-      console.log('[Socket] Disconnecting...');
-      newSocket.off('connect');
-      newSocket.off('connect_error');
-      newSocket.off('error');
-      newSocket.disconnect();
+      channel.unbind_all();
+      pusher.unsubscribe(`session-${id}`);
+      pusher.disconnect();
     };
-  }, [id, role, inputLang, outputLang]);
+  }, [id, role]);
 
-  const stopAndSend = useCallback(() => {
+  const stopAndSend = useCallback(async () => {
     if (isRecordingRef.current) {
       isRecordingRef.current = false;
       setIsSpeaking(false);
       
       const pcmBuffer = pcmDataRef.current;
-      if (pcmBuffer.length === 0) {
-        console.warn('[VAD] No audio captured');
-        return;
-      }
+      if (pcmBuffer.length === 0) return;
 
-      // Convert captured PCM to 16-bit WAV
       const wavBlob = encodeWAV(pcmBuffer, 16000);
-      pcmDataRef.current = []; // Clear for next utterance
-
-      if (wavBlob.size < 500) {
-        console.warn('[VAD] Audio too short');
-        return;
-      }
+      pcmDataRef.current = [];
 
       const reader = new FileReader();
       reader.readAsDataURL(wavBlob);
-      reader.onloadend = () => {
+      reader.onloadend = async () => {
         const base64data = reader.result.split(',')[1];
-        if (socket && base64data.length > 500) {
-          socket.emit('audio_utterance', { sessionId: id, role, audioBase64: base64data });
+        if (base64data.length > 500) {
+          const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'https://galaxy-translator.onrender.com';
+          
+          // Send via HTTP POST in Serverless mode
+          await fetch(`${BACKEND_URL}/api/audio`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ 
+              sessionId: id, 
+              role, 
+              audioBase64: base64data,
+              inputLang,
+              outputLang
+            })
+          });
         }
       };
     }
-  }, [socket, id, role]);
+  }, [id, role, inputLang, outputLang]);
 
   const startNewRecording = useCallback(() => {
     if (isRecordingRef.current) return;

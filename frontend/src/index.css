@@ -183,3 +183,14 @@ input:focus, select:focus {
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--glass-border); border-radius: 10px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
+
+@keyframes pulse-red {
+  0% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.5; transform: scale(0.95); color: #f87171; }
+  100% { opacity: 1; transform: scale(1); }
+}
+
+.pulse-recording {
+  animation: pulse-red 1.5s infinite ease-in-out;
+  color: var(--accent-secondary) !important;
+}

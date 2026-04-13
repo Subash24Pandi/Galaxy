@@ -436,7 +436,7 @@ const ActiveCall = () => {
         </div>
 
         {!isMobile && (
-          <div style={{ flex: 1, display: 'flex', justifyContent: 'flex-end', color: 'var(--text-muted)', fontSize: '0.85rem', fontWeight: '700', letterSpacing: '0.1em' }}>
+          <div className={isSpeaking ? 'pulse-recording' : ''} style={{ flex: 1, display: 'flex', justifyContent: 'flex-end', color: 'var(--text-muted)', fontSize: '0.85rem', fontWeight: '700', letterSpacing: '0.1em' }}>
              {isSpeaking ? 'RECORDING' : 'IDLE'}
           </div>
         )}

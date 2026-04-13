@@ -111,19 +111,39 @@ module.exports = (io) => {
         if (targetData) targetLang = targetData.inputLang || targetLang;
         if (senderData) inputLang = senderData.inputLang || inputLang;
 
-        // 3. Transcription
-        const originalText = await sttService.transcribeAudio(audioBase64, inputLang);
+        try {
+        console.log(`[Pipeline] Processing audio from ${role}...`);
         
-        if (!originalText || originalText.trim() === '') return;
+        // 1. Transcription (STT)
+        const originalText = await sttService.transcribeAudio(audioBase64, inputLang);
+        if (!originalText) throw new Error('Could not understand audio');
 
-        // 4. Translation
+        // 2. Translation
+        const targetLang = role === 'agent' ? participants[sessionId]['customer']?.inputLang || outputLang : participants[sessionId]['agent']?.inputLang || outputLang;
         const translatedText = await translationService.translateText(originalText, inputLang, targetLang);
 
-        // 5. Synthesis
-        const translatedAudioBase64 = await ttsService.synthesizeSpeech(translatedText, targetLang);
+        // 3. Synthesis (TTS)
+        const ttsAudio = await ttsService.synthesizeSpeech(translatedText, targetLang);
 
-        const timestamp = new Date().toISOString();
-        const transcriptMessage = { role, originalText, translatedText, sourceLang: inputLang, targetLang, timestamp };
+        // 4. Distribute
+        const targetRole = role === 'agent' ? 'customer' : 'agent';
+        io.to(sessionId).emit('transcript_update', {
+          role,
+          originalText,
+          translatedText,
+          timestamp: new Date().toISOString()
+        });
+
+        io.to(sessionId).emit('audio_playback', {
+          targetRole,
+          audioBase64: ttsAudio
+        });
+
+        console.log(`[Pipeline] Completed successfully for ${role}`);
+      } catch (error) {
+        console.error('[Pipeline] Error:', error.message);
+        socket.emit('session_status', { message: `AI Error: ${error.message}` });
+      }
 
         // Persist to Postgres
         try {

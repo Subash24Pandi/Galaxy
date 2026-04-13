@@ -138,6 +138,12 @@ const ActiveCall = () => {
 
   const startNewRecording = useCallback(() => {
     if (isRecordingRef.current) return;
+    
+    // Kickstart the audio engine in case the browser put it to sleep
+    if (audioContextRef.current && audioContextRef.current.state === 'suspended') {
+      audioContextRef.current.resume();
+    }
+
     pcmDataRef.current = [];
     isRecordingRef.current = true;
     setIsSpeaking(true);

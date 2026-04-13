@@ -3,14 +3,19 @@ const { v4: uuidv4 } = require('uuid');
 
 const createSession = async (customId = null) => {
   const sessionId = customId || uuidv4();
-  const text = 'INSERT INTO sessions(id, status) VALUES($1, $2) RETURNING *';
+  // Using ON CONFLICT to allow re-joining/re-creation without errors
+  const text = `
+    INSERT INTO sessions(id, status) VALUES($1, $2) 
+    ON CONFLICT (id) DO NOTHING 
+    RETURNING *
+  `;
   const values = [sessionId, 'active'];
   try {
     const res = await query(text, values);
-    return res.rows[0];
+    // If conflict, res.rows might be empty, so we return a dummy session object
+    return res.rows[0] || { id: sessionId, status: 'active' };
   } catch (err) {
-    console.error('Error creating session in DB', err);
-    // Return the ID anyway for mock support
+    console.error('Error in createSession:', err);
     return { id: sessionId, status: 'active' };
   }
 };

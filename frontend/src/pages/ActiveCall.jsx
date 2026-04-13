@@ -182,7 +182,7 @@ const ActiveCall = () => {
     console.log('[VAD] --- RECORDING STARTED ---');
     isRecordingRef.current = true;
     setIsSpeaking(true);
-  }, [isMuted, socket, id, role]);
+  }, [isMuted, socket, id, role, stopAndSend]);
 
   useEffect(() => {
     const initVAD = async () => {
@@ -256,7 +256,13 @@ const ActiveCall = () => {
       }
     };
 
-    if (!isMuted) initVAD();
+    if (isMuted) {
+       setVolume(0);
+       setIsSpeaking(false);
+       if (isRecordingRef.current) stopAndSend();
+    }
+    
+    initVAD();
     
     return () => {
       console.log('[Cleanup] Stopping audio context and stream...');

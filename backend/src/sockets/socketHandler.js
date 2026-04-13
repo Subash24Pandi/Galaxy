@@ -1,5 +1,5 @@
 const { getRedisClient } = require('../config/redisClient');
-const { saveMessage } = require('../models/sessionModel');
+const { saveMessage, createSession } = require('../models/sessionModel');
 const sttService = require('../services/sttService');
 const translationService = require('../services/translationService');
 const ttsService = require('../services/ttsService');
@@ -22,6 +22,9 @@ module.exports = (io) => {
           socket.emit('error', { message: 'sessionId and role are required.' });
           return;
         }
+
+        // ELITE FIX: Ensure session exists in DB so messages can be saved
+        await createSession(sessionId);
 
         socket.sessionId = sessionId;
         socket.role = role;

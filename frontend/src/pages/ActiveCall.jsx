@@ -77,7 +77,6 @@ const ActiveCall = () => {
     
     newSocket.on('audio_playback', (data) => {
       if (data.targetRole === role && data.audioBase64) {
-        console.log('[Socket] Audio received, playing...');
         playAudio(data.audioBase64);
       }
     });
@@ -85,15 +84,11 @@ const ActiveCall = () => {
     const playAudio = (base64) => {
       try {
         const audio = new Audio(`data:audio/wav;base64,${base64}`);
-        audio.play().catch(e => {
-          console.error('[Audio] Playback failed (Interaction required?):', e);
+        audio.play().catch(() => {
           // Fallback if browser blocks auto-play
-          const retryAudio = new Audio(`data:audio/wav;base64,${base64}`);
-          retryAudio.play().catch(err => console.error('[Audio] Final fallback failed:', err));
+          new Audio(`data:audio/wav;base64,${base64}`).play().catch(() => {});
         });
-      } catch (e) {
-        console.error('[Audio] Base64 processing failed:', e);
-      }
+      } catch (e) {}
     };
 
     return () => {

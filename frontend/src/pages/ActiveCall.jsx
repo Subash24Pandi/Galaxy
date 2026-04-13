@@ -247,9 +247,9 @@ const ActiveCall = () => {
         const dataArray = new Uint8Array(bufferLength);
         
         // ULTRA SENSITIVE: Catch even quiet whispers
-        const THRESHOLD = 0.005;
+        const THRESHOLD = 0.001;
         // Fast response for smooth conversation
-        const SILENCE_DURATION = 600;
+        const SILENCE_DURATION = 1000;
         let lastSpeechTime = Date.now();
 
         const checkAudio = () => {

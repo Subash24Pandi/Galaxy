@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { useParams, useLocation, useNavigate } from 'react-router-dom';
 import { io } from 'socket.io-client';
-import { Mic, MicOff, PhoneOff, MessageSquare, ShieldCheck, Activity, Globe, Send } from 'lucide-react';
+import { Mic, MicOff, PhoneOff, MessageSquare, ShieldCheck, Activity, Globe } from 'lucide-react';
 
 const ActiveCall = () => {
   const { id } = useParams();

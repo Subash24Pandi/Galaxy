@@ -12,7 +12,7 @@ const transcribeAudio = async (audioBase64, language) => {
   const formData = new FormData();
   formData.append('file', audioBlob, 'audio.wav');
   formData.append('language_code', sarvamLang);
-  formData.append('model', 'saaras:v1'); // v1 is usually more stable for raw WAV
+  formData.append('model', 'saaras:v3'); 
 
   const response = await fetch('https://api.sarvam.ai/speech-to-text', {
     method: 'POST',

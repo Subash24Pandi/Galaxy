@@ -114,19 +114,28 @@ module.exports = (io) => {
         try {
         console.log(`[Pipeline] Processing audio from ${role}...`);
         
+        // Get the actual session data for this specific user
+        const sessionData = participants[sessionId];
+        if (!sessionData || !sessionData[role]) throw new Error('Session data lost');
+
+        const senderData = sessionData[role];
+        const targetRole = role === 'agent' ? 'customer' : 'agent';
+        const receiverData = sessionData[targetRole];
+
         // 1. Transcription (STT)
-        const originalText = await sttService.transcribeAudio(audioBase64, inputLang);
+        // Use the sender's input language
+        const originalText = await sttService.transcribeAudio(audioBase64, senderData.inputLang);
         if (!originalText) throw new Error('Could not understand audio');
 
         // 2. Translation
-        const targetLang = role === 'agent' ? participants[sessionId]['customer']?.inputLang || outputLang : participants[sessionId]['agent']?.inputLang || outputLang;
-        const translatedText = await translationService.translateText(originalText, inputLang, targetLang);
+        // Target is the receiver's inputLang, or the sender's outputLang as fallback
+        const targetLang = receiverData ? receiverData.inputLang : senderData.outputLang;
+        const translatedText = await translationService.translateText(originalText, senderData.inputLang, targetLang);
 
         // 3. Synthesis (TTS)
         const ttsAudio = await ttsService.synthesizeSpeech(translatedText, targetLang);
 
-        // 4. Distribute
-        const targetRole = role === 'agent' ? 'customer' : 'agent';
+        // 4. Distribute to room
         io.to(sessionId).emit('transcript_update', {
           role,
           originalText,

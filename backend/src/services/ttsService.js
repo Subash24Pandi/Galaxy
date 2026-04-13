@@ -11,8 +11,6 @@ const synthesizeSpeech = async (text, language) => {
   // Ensure format is 'xx-IN'
   const sarvamLang = language.includes('-IN') ? language : `${language}-IN`;
 
-  console.log(`[TTS] Synthesizing ${text.length} chars in lang: ${sarvamLang} (Sarvam AI)`);
-
   const response = await fetch('https://api.sarvam.ai/text-to-speech', {
     method: 'POST',
     headers: {
@@ -41,7 +39,6 @@ const synthesizeSpeech = async (text, language) => {
     throw new Error('Sarvam TTS returned empty audio list');
   }
 
-  console.log(`[TTS] Success — audio size: ${base64.length} chars`);
   return base64;
 };
 

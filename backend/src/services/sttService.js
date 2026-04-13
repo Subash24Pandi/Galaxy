@@ -6,9 +6,6 @@ const transcribeAudio = async (audioBase64, language) => {
 
   // Ensure format is 'xx-IN'
   const sarvamLang = language.includes('-IN') ? language : `${language}-IN`;
-  
-  console.log(`[STT] Transcribing audio in language: ${sarvamLang}, base64 length: ${audioBase64.length}`);
-
   const audioBuffer = Buffer.from(audioBase64, 'base64');
   const audioBlob = new Blob([audioBuffer], { type: 'audio/wav' });
   
@@ -36,7 +33,6 @@ const transcribeAudio = async (audioBase64, language) => {
     throw new Error('Sarvam STT returned no transcript');
   }
 
-  console.log(`[STT] Transcript: "${resultText}"`);
   return resultText;
 };
 

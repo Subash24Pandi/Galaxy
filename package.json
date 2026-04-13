@@ -1,5 +1,7 @@
 {
-  "name": "galaxy-monorepo",
+  "name": "galaxy-ai-translator",
+  "version": "1.0.0",
+  "description": "Real-time AI voice translation platform",
   "private": true,
   "scripts": {
     "build": "npm install --prefix frontend && npm run build --prefix frontend"

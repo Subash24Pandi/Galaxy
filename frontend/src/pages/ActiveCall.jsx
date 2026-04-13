@@ -154,7 +154,6 @@ const ActiveCall = () => {
       reader.onloadend = () => {
         const base64data = reader.result.split(',')[1];
         if (socket && base64data.length > 500) {
-          console.log(`[VAD] Emitting Native WAV: ${base64data.length} chars`);
           socket.emit('audio_utterance', { sessionId: id, role, audioBase64: base64data });
         }
       };
@@ -166,7 +165,6 @@ const ActiveCall = () => {
     pcmDataRef.current = [];
     isRecordingRef.current = true;
     setIsSpeaking(true);
-    console.log('[VAD] --- NATIVE RECORDING STARTED ---');
   }, [isMuted]);
 
   const encodeWAV = (samples, sampleRate) => {
@@ -267,12 +265,10 @@ const ActiveCall = () => {
           setVolume(rms);
 
           if (rms > THRESHOLD) {
-            if (Date.now() % 100 < 20) console.log('[VAD] Volume:', rms.toFixed(4)); // Debug log
             lastSpeechTime = Date.now();
             if (!isRecordingRef.current) startNewRecording();
           } else {
             if (isRecordingRef.current && (Date.now() - lastSpeechTime > SILENCE_DURATION)) {
-              console.log('[VAD] --- SILENCE DETECTED, SENDING ---');
               stopAndSend();
             }
           }
@@ -344,9 +340,6 @@ const ActiveCall = () => {
             {socket?.id && (
               <div style={{ fontSize: '0.65rem', opacity: 0.5, color: 'var(--accent-primary)', display: 'flex', gap: '1rem' }}>
                 <span>Socket: {socket.id}</span>
-                <span style={{ color: volume > 0.005 ? '#4ade80' : '#f87171' }}>
-                  Mic Lv: {volume.toFixed(4)}
-                </span>
               </div>
             )}
           </div>

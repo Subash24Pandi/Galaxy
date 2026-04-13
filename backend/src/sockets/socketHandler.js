@@ -109,32 +109,20 @@ module.exports = (io) => {
         if (senderData) inputLang = senderData.inputLang || inputLang;
 
         // 3. Transcription
-        console.log(`[Pipeline] Step 1: STT Starting (${inputLang})`);
-        const sttStartTime = Date.now();
         const originalText = await sttService.transcribeAudio(audioBase64, inputLang);
-        console.log(`[Pipeline] Step 1: STT Done in ${Date.now() - sttStartTime}ms. Text: "${originalText}"`);
         
-        if (!originalText || originalText.trim() === '') {
-          console.warn('[Pipeline] Aborting: Empty transcript');
-          return;
-        }
+        if (!originalText || originalText.trim() === '') return;
 
         // 4. Translation
-        console.log(`[Pipeline] Step 2: Translation Starting (${inputLang} -> ${targetLang})`);
-        const transStartTime = Date.now();
         const translatedText = await translationService.translateText(originalText, inputLang, targetLang);
-        console.log(`[Pipeline] Step 2: Translation Done in ${Date.now() - transStartTime}ms. Text: "${translatedText}"`);
 
         // 5. Synthesis
-        console.log(`[Pipeline] Step 3: TTS Starting (${targetLang})`);
-        const ttsStartTime = Date.now();
         const translatedAudioBase64 = await ttsService.synthesizeSpeech(translatedText, targetLang);
-        console.log(`[Pipeline] Step 3: TTS Done in ${Date.now() - ttsStartTime}ms.`);
 
         const timestamp = new Date().toISOString();
         const transcriptMessage = { role, originalText, translatedText, sourceLang: inputLang, targetLang, timestamp };
 
-        // Persist to Postgres — non-fatal, pipeline must not crash on DB error
+        // Persist to Postgres
         try {
           await saveMessage({
             sessionId,
@@ -145,13 +133,12 @@ module.exports = (io) => {
             translatedLang: targetLang,
           });
         } catch (dbErr) {
-          console.warn('[Socket] DB save failed (non-fatal):', dbErr.message);
+          console.warn('[Socket] DB save failed:', dbErr.message);
         }
 
-        // Broadcast transcript to all participants
+        // Broadcast
         io.to(sessionId).emit('transcript_update', transcriptMessage);
         
-        // Send translated audio ONLY to the recipient
         io.to(sessionId).emit('audio_playback', {
           sessionId,
           fromRole: role,
@@ -160,7 +147,7 @@ module.exports = (io) => {
           timestamp,
         });
         
-        console.log(`[Socket] ✅ Pipeline complete: ${role} → ${targetRole} (${inputLang} → ${targetLang})`);
+        console.log(`[Pipeline] ✅ ${role} → ${targetRole}: "${originalText.substring(0, 30)}..." → "${translatedText.substring(0, 30)}..."`);
       } catch (error) {
         console.error('[Socket] Pipeline error:', error);
         socket.emit('error', { message: 'Translation failed', details: error.message });

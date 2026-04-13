@@ -54,15 +54,22 @@ app.get('/api/health', async (req, res) => {
   res.status(overallOk ? 200 : 207).json(healthStatus);
 });
 
-// Initialize Socket.io with more robust CORS for production
+// Initialize Socket.io with production-grade CORS and lifecycle logging
 const io = new Server(server, {
   cors: {
-    origin: true, // Reflects the request origin, allowing credentials
+    origin: (origin, callback) => {
+      // Allow all origins for the MVP, but reflect correctly for browsers
+      callback(null, true);
+    },
     methods: ['GET', 'POST'],
     credentials: true
   },
   allowEIO3: true,
   transports: ['websocket', 'polling']
+});
+
+io.on('connection', (socket) => {
+  console.log(`[Socket] Connection Handshake Successful: ${socket.id} (Transport: ${socket.conn.transport.name})`);
 });
 
 const startServer = async () => {

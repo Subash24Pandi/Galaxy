@@ -63,12 +63,15 @@ const ActiveCall = () => {
 
     newSocket.on('connect_error', (err) => {
       console.error('[Socket] Connection error:', err);
-      setStatus(`Connect Error: ${err.message}`);
+      // Stringify the error object so it's readable in the UI
+      const errDetail = typeof err === 'object' ? JSON.stringify(err) : String(err);
+      setStatus(`Connect Error: ${errDetail}`);
     });
 
     newSocket.on('error', (err) => {
       console.error('[Socket] General error:', err);
-      setStatus(`Error: ${err.message}`);
+      const errDetail = typeof err === 'object' ? JSON.stringify(err) : String(err);
+      setStatus(`Error: ${errDetail}`);
     });
     
     newSocket.on('session_status', (data) => setStatus(data.message));
@@ -237,12 +240,17 @@ const ActiveCall = () => {
           </div>
           <div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-              <h2 style={{ fontSize: isMobile ? '0.9rem' : '1.25rem', fontWeight: '700' }}>ID: {id.substring(0, 4)}...</h2>
+              <h2 style={{ fontSize: isMobile ? '0.9rem' : '1.25rem', fontWeight: '700' }}>Session: {id}</h2>
               <div style={{ 
                 padding: '0.2rem 0.5rem', borderRadius: '6px', fontSize: '0.6rem', fontWeight: '800', 
                 background: 'rgba(255,255,255,0.08)', border: '1px solid var(--glass-border)', color: 'var(--accent-secondary)'
               }}>{role.toUpperCase()}</div>
             </div>
+            {socket?.id && (
+              <div style={{ fontSize: '0.65rem', opacity: 0.5, color: 'var(--accent-primary)' }}>
+                Socket: {socket.id}
+              </div>
+            )}
           </div>
         </div>
 

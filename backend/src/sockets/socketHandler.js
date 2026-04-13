@@ -15,8 +15,10 @@ module.exports = (io) => {
      * JOIN SESSION
      */
     socket.on('join_session', async ({ sessionId, role, inputLang, outputLang }) => {
+      console.log(`[Socket] Attempting Join: Session=${sessionId}, Role=${role}, Lang=${inputLang}->${outputLang}`);
       try {
         if (!sessionId || !role) {
+          console.error('[Socket] Join failed: Missing sessionId or role');
           socket.emit('error', { message: 'sessionId and role are required.' });
           return;
         }
@@ -50,6 +52,7 @@ module.exports = (io) => {
         }
 
         socket.emit('joined_session', { success: true, sessionId, role });
+        console.log(`[Socket] Join Success: ${socket.id} joined ${sessionId} as ${role}`);
         
         io.to(sessionId).emit('session_status', {
           type: 'join',
@@ -103,14 +106,27 @@ module.exports = (io) => {
         if (senderData) inputLang = senderData.inputLang || inputLang;
 
         // 3. Transcription
+        console.log(`[Pipeline] Step 1: STT Starting (${inputLang})`);
+        const sttStartTime = Date.now();
         const originalText = await sttService.transcribeAudio(audioBase64, inputLang);
-        if (!originalText || originalText.trim() === '') return;
+        console.log(`[Pipeline] Step 1: STT Done in ${Date.now() - sttStartTime}ms. Text: "${originalText}"`);
+        
+        if (!originalText || originalText.trim() === '') {
+          console.warn('[Pipeline] Aborting: Empty transcript');
+          return;
+        }
 
         // 4. Translation
+        console.log(`[Pipeline] Step 2: Translation Starting (${inputLang} -> ${targetLang})`);
+        const transStartTime = Date.now();
         const translatedText = await translationService.translateText(originalText, inputLang, targetLang);
+        console.log(`[Pipeline] Step 2: Translation Done in ${Date.now() - transStartTime}ms. Text: "${translatedText}"`);
 
         // 5. Synthesis
+        console.log(`[Pipeline] Step 3: TTS Starting (${targetLang})`);
+        const ttsStartTime = Date.now();
         const translatedAudioBase64 = await ttsService.synthesizeSpeech(translatedText, targetLang);
+        console.log(`[Pipeline] Step 3: TTS Done in ${Date.now() - ttsStartTime}ms.`);
 
         const timestamp = new Date().toISOString();
         const transcriptMessage = { role, originalText, translatedText, sourceLang: inputLang, targetLang, timestamp };

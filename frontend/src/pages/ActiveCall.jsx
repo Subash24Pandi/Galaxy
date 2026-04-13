@@ -171,10 +171,10 @@ const ActiveCall = () => {
         const bufferLength = analyser.frequencyBinCount;
         const dataArray = new Uint8Array(bufferLength);
         
-        // Tuned: picks up normal speech but ignores background hum
-        const THRESHOLD = 0.02;
-        // Tuned: faster send after pause
-        const SILENCE_DURATION = 700;
+        // MUCH MORE SENSITIVE: Picks up quiet speech clearly
+        const THRESHOLD = 0.005;
+        // Faster response
+        const SILENCE_DURATION = 600;
         let lastSpeechTime = Date.now();
 
         const checkAudio = () => {
@@ -194,6 +194,7 @@ const ActiveCall = () => {
           setVolume(rms);
 
           if (rms > THRESHOLD) {
+            if (Date.now() % 100 < 20) console.log('[VAD] Volume:', rms.toFixed(4)); // Debug log
             lastSpeechTime = Date.now();
             if (!isRecordingRef.current) startNewRecording();
           } else {
@@ -377,7 +378,7 @@ const ActiveCall = () => {
               width: isMobile ? '4px' : '6px',
               background: isSpeaking ? 'var(--accent-primary)' : 'var(--glass-border)',
               borderRadius: '12px',
-              height: `${6 + (volume * 400 * (0.5 + Math.random()))}px`,
+              height: `${6 + (volume * 800 * (0.5 + Math.random()))}px`,
               maxHeight: '100%',
               transition: 'height 0.15s ease-out'
             }} />

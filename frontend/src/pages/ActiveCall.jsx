@@ -113,12 +113,26 @@ const ActiveCall = () => {
     };
 
     mediaRecorder.onstop = () => {
+      if (audioChunksRef.current.length === 0) {
+        console.warn('[VAD] No audio chunks captured, skipping emission.');
+        if (!isMuted) startNewRecording();
+        return;
+      }
+
       const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+      
+      if (audioBlob.size < 200) { // Tiny blobs are usually noise or empty
+        console.warn(`[VAD] Audio blob too small (${audioBlob.size} bytes), skipping.`);
+        if (!isMuted) startNewRecording();
+        return;
+      }
+
       const reader = new FileReader();
       reader.readAsDataURL(audioBlob);
       reader.onloadend = () => {
         const base64data = reader.result.split(',')[1];
-        if (socket && base64data.length > 1000) {
+        if (socket && base64data.length > 500) {
+          console.log(`[VAD] Emitting audio utterance: ${base64data.length} chars`);
           socket.emit('audio_utterance', { sessionId: id, role, audioBase64: base64data });
         }
       };

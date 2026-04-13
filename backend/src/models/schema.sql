@@ -1,14 +1,17 @@
 -- SQL commands to create the necessary tables
+-- MIGRATION: Ensure custom IDs work on existing UUID tables
+ALTER TABLE sessions ALTER COLUMN id TYPE VARCHAR(100);
+ALTER TABLE messages ALTER COLUMN session_id TYPE VARCHAR(100);
 
 CREATE TABLE IF NOT EXISTS sessions (
-  id UUID PRIMARY KEY,
+  id VARCHAR(100) PRIMARY KEY,
   status VARCHAR(50) DEFAULT 'active',
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE IF NOT EXISTS messages (
   id UUID PRIMARY KEY,
-  session_id UUID REFERENCES sessions(id) ON DELETE CASCADE,
+  session_id VARCHAR(100) REFERENCES sessions(id) ON DELETE CASCADE,
   sender_role VARCHAR(50) NOT NULL,
   original_text TEXT NOT NULL,
   original_lang VARCHAR(50) NOT NULL,

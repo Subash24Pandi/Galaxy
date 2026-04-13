@@ -20,13 +20,10 @@ const ActiveCall = () => {
   const [volume, setVolume] = useState(0);
   const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
 
-  const mediaRecorderRef = useRef(null);
-  const audioChunksRef = useRef([]);
-  const chatEndRef = useRef(null);
-  
   const audioContextRef = useRef(null);
   const analyserRef = useRef(null);
   const streamRef = useRef(null);
+  const pcmDataRef = useRef([]); // Stores raw PCM samples
   const isRecordingRef = useRef(false);
 
   useEffect(() => {
@@ -133,56 +130,77 @@ const ActiveCall = () => {
   }, [id, role, inputLang, outputLang]);
 
   const stopAndSend = useCallback(() => {
-    if (mediaRecorderRef.current && isRecordingRef.current) {
-      mediaRecorderRef.current.stop();
+    if (isRecordingRef.current) {
       isRecordingRef.current = false;
       setIsSpeaking(false);
-    }
-  }, []);
-
-  const startNewRecording = useCallback(() => {
-    if (isMuted || isRecordingRef.current) return;
-    
-    audioChunksRef.current = [];
-    const mediaRecorder = new MediaRecorder(streamRef.current);
-    mediaRecorderRef.current = mediaRecorder;
-
-    mediaRecorder.ondataavailable = (event) => {
-      if (event.data.size > 0) audioChunksRef.current.push(event.data);
-    };
-
-    mediaRecorder.onstop = () => {
-      if (audioChunksRef.current.length === 0) {
-        console.warn('[VAD] No audio chunks captured, skipping emission.');
-        if (!isMuted) startNewRecording();
+      
+      const pcmBuffer = pcmDataRef.current;
+      if (pcmBuffer.length === 0) {
+        console.warn('[VAD] No audio captured');
         return;
       }
 
-      const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
-      
-      if (audioBlob.size < 200) { // Tiny blobs are usually noise or empty
-        console.warn(`[VAD] Audio blob too small (${audioBlob.size} bytes), skipping.`);
-        if (!isMuted) startNewRecording();
+      // Convert captured PCM to 16-bit WAV
+      const wavBlob = encodeWAV(pcmBuffer, 16000);
+      pcmDataRef.current = []; // Clear for next utterance
+
+      if (wavBlob.size < 500) {
+        console.warn('[VAD] Audio too short');
         return;
       }
 
       const reader = new FileReader();
-      reader.readAsDataURL(audioBlob);
+      reader.readAsDataURL(wavBlob);
       reader.onloadend = () => {
         const base64data = reader.result.split(',')[1];
         if (socket && base64data.length > 500) {
-          console.log(`[VAD] Emitting audio utterance: ${base64data.length} chars`);
+          console.log(`[VAD] Emitting Native WAV: ${base64data.length} chars`);
           socket.emit('audio_utterance', { sessionId: id, role, audioBase64: base64data });
         }
       };
-      if (!isMuted) startNewRecording();
-    };
+    }
+  }, [socket, id, role]);
 
-    mediaRecorder.start();
-    console.log('[VAD] --- RECORDING STARTED ---');
+  const startNewRecording = useCallback(() => {
+    if (isMuted || isRecordingRef.current) return;
+    pcmDataRef.current = [];
     isRecordingRef.current = true;
     setIsSpeaking(true);
-  }, [isMuted, socket, id, role, stopAndSend]);
+    console.log('[VAD] --- NATIVE RECORDING STARTED ---');
+  }, [isMuted]);
+
+  const encodeWAV = (samples, sampleRate) => {
+    const buffer = new ArrayBuffer(44 + samples.length * 2);
+    const view = new DataView(buffer);
+
+    const writeString = (offset, string) => {
+      for (let i = 0; i < string.length; i++) {
+        view.setUint8(offset + i, string.charCodeAt(i));
+      }
+    };
+
+    writeString(0, 'RIFF');
+    view.setUint32(4, 32 + samples.length * 2, true);
+    writeString(8, 'WAVE');
+    writeString(12, 'fmt ');
+    view.setUint32(16, 16, true);
+    view.setUint16(20, 1, true);
+    view.setUint16(22, 1, true);
+    view.setUint32(24, sampleRate, true);
+    view.setUint32(28, sampleRate * 2, true);
+    view.setUint16(32, 2, true);
+    view.setUint16(34, 16, true);
+    writeString(36, 'data');
+    view.setUint32(40, samples.length * 2, true);
+
+    let offset = 44;
+    for (let i = 0; i < samples.length; i++, offset += 2) {
+      const s = Math.max(-1, Math.min(1, samples[i]));
+      view.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
+    }
+
+    return new Blob([buffer], { type: 'audio/wav' });
+  };
 
   useEffect(() => {
     const initVAD = async () => {
@@ -198,12 +216,24 @@ const ActiveCall = () => {
         });
         streamRef.current = stream;
 
-        const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        const audioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
         const analyser = audioContext.createAnalyser();
         const source = audioContext.createMediaStreamSource(stream);
         
-        analyser.fftSize = 256; // Smaller = faster analysis loop
+        // Custom Processor for raw PCM capture
+        const processor = audioContext.createScriptProcessor(4096, 1, 1);
+        
+        processor.onaudioprocess = (e) => {
+          if (isRecordingRef.current) {
+            const inputData = e.inputBuffer.getChannelData(0);
+            pcmDataRef.current.push(...inputData);
+          }
+        };
+
+        analyser.fftSize = 256; 
         source.connect(analyser);
+        source.connect(processor);
+        processor.connect(audioContext.destination);
         
         audioContextRef.current = audioContext;
         analyserRef.current = analyser;

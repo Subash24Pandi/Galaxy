@@ -10,12 +10,12 @@ const transcribeAudio = async (audioBase64, language) => {
   console.log(`[STT] Transcribing audio in language: ${sarvamLang}, base64 length: ${audioBase64.length}`);
 
   const audioBuffer = Buffer.from(audioBase64, 'base64');
-  const audioBlob = new Blob([audioBuffer], { type: 'audio/webm' });
+  const audioBlob = new Blob([audioBuffer], { type: 'audio/wav' });
   
   const formData = new FormData();
-  formData.append('file', audioBlob, 'audio.webm');
+  formData.append('file', audioBlob, 'audio.wav');
   formData.append('language_code', sarvamLang);
-  formData.append('model', 'saaras:v3');
+  formData.append('model', 'saaras:v1'); // v1 is usually more stable for raw WAV
 
   const response = await fetch('https://api.sarvam.ai/speech-to-text', {
     method: 'POST',

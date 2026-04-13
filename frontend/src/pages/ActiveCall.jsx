@@ -215,10 +215,10 @@ const ActiveCall = () => {
         const bufferLength = analyser.frequencyBinCount;
         const dataArray = new Uint8Array(bufferLength);
         
-        // TUNED: Higher than background noise (0.0062 in screenshot)
-        const THRESHOLD = 0.015;
-        // Faster response
-        const SILENCE_DURATION = 500;
+        // ULTRA SENSITIVE: Catch even quiet whispers
+        const THRESHOLD = 0.005;
+        // Fast response for smooth conversation
+        const SILENCE_DURATION = 600;
         let lastSpeechTime = Date.now();
 
         const checkAudio = () => {

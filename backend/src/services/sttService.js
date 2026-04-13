@@ -1,39 +1,42 @@
+const axios = require('axios');
+const FormData = require('form-data');
+
 const transcribeAudio = async (audioBase64, language) => {
   const apiKey = process.env.SARVAM_API_KEY;
   if (!apiKey || apiKey === 'your_sarvam_api_key') {
     throw new Error('SARVAM_API_KEY is missing');
   }
 
-  // Ensure format is 'xx-IN'
-  const sarvamLang = language.includes('-IN') ? language : `${language}-IN`;
-  const audioBuffer = Buffer.from(audioBase64, 'base64');
-  const audioBlob = new Blob([audioBuffer], { type: 'audio/wav' });
-  
-  const formData = new FormData();
-  formData.append('file', audioBlob, 'audio.wav');
-  formData.append('language_code', sarvamLang);
-  formData.append('model', 'saaras:v3'); 
+  try {
+    const audioBuffer = Buffer.from(audioBase64, 'base64');
+    const sarvamLang = language.includes('-IN') ? language : `${language}-IN`;
+    
+    const formData = new FormData();
+    formData.append('file', audioBuffer, {
+      filename: 'audio.wav',
+      contentType: 'audio/wav',
+    });
+    formData.append('language_code', sarvamLang);
+    formData.append('model', 'saaras:v3');
 
-  const response = await fetch('https://api.sarvam.ai/speech-to-text', {
-    method: 'POST',
-    headers: { 'api-subscription-key': apiKey },
-    body: formData
-  });
+    const response = await axios.post('https://api.sarvam.ai/speech-to-text', formData, {
+      headers: {
+        ...formData.getHeaders(),
+        'api-subscription-key': apiKey,
+      },
+    });
 
-  if (!response.ok) {
-    const errText = await response.text();
-    console.error(`[STT] Sarvam Error ${response.status}:`, errText);
-    throw new Error(`Sarvam STT Error: ${response.status} - ${errText}`);
+    const resultText = response.data.transcript || response.data.text;
+    if (!resultText) {
+      throw new Error('Sarvam STT returned no transcript');
+    }
+
+    return resultText;
+  } catch (error) {
+    const errDetail = error.response ? JSON.stringify(error.response.data) : error.message;
+    console.error(`[STT] Sarvam API Error:`, errDetail);
+    throw new Error(`Sarvam STT Failed: ${errDetail}`);
   }
-
-  const data = await response.json();
-  const resultText = data.transcript !== undefined ? data.transcript : data.text;
-
-  if (resultText === undefined || resultText === null) {
-    throw new Error('Sarvam STT returned no transcript');
-  }
-
-  return resultText;
 };
 
 module.exports = { transcribeAudio };

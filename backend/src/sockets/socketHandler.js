@@ -57,12 +57,15 @@ module.exports = (io) => {
         socket.emit('joined_session', { success: true, sessionId, role });
         console.log(`[Socket] Join Success: ${socket.id} joined ${sessionId} as ${role}`);
         
-        io.to(sessionId).emit('session_status', {
-          type: 'join',
-          sessionId,
-          role,
-          message: `${role} joined.`,
-          timestamp: new Date().toISOString(),
+        // Notify self
+        socket.emit('session_status', { 
+          status: 'joined', 
+          message: `Joined session ${sessionId} as ${role}` 
+        });
+
+        // Notify others in the room
+        socket.to(sessionId).emit('session_status', { 
+          message: `${role.toUpperCase()} has joined the session` 
         });
       } catch (error) {
         console.error('[Socket] Join error:', error);

@@ -316,6 +316,7 @@ const ActiveCall = () => {
             {socket?.id && (
               <div style={{ fontSize: '0.65rem', opacity: 0.5, color: 'var(--accent-primary)', display: 'flex', gap: '1rem' }}>
                 <span>Socket: {socket.id}</span>
+                <span style={{ color: status.includes('Error') ? '#f87171' : 'var(--accent-secondary)' }}>• {status}</span>
               </div>
             )}
           </div>

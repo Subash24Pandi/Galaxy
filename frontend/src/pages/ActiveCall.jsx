@@ -219,6 +219,9 @@ const ActiveCall = () => {
 
         const checkAudio = () => {
           if (isMuted) {
+            setVolume(0);
+            setIsSpeaking(false);
+            if (isRecordingRef.current) stopAndSend();
             requestAnimationFrame(checkAudio);
             return;
           }
@@ -302,8 +305,11 @@ const ActiveCall = () => {
               }}>{role.toUpperCase()}</div>
             </div>
             {socket?.id && (
-              <div style={{ fontSize: '0.65rem', opacity: 0.5, color: 'var(--accent-primary)' }}>
-                Socket: {socket.id}
+              <div style={{ fontSize: '0.65rem', opacity: 0.5, color: 'var(--accent-primary)', display: 'flex', gap: '1rem' }}>
+                <span>Socket: {socket.id}</span>
+                <span style={{ color: volume > 0.005 ? '#4ade80' : '#f87171' }}>
+                  Mic Lv: {volume.toFixed(4)}
+                </span>
               </div>
             )}
           </div>

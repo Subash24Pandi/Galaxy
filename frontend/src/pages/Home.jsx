@@ -14,7 +14,7 @@ const Home = () => {
     const handleResize = () => setIsMobile(window.innerWidth < 768);
     window.addEventListener('resize', handleResize);
     
-    const API_BASE_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:5000';
+    const API_BASE_URL = import.meta.env.VITE_BACKEND_URL || 'https://galaxy-translator.onrender.com';
 
     const fetchRecent = async () => {
       try {
@@ -43,7 +43,7 @@ const Home = () => {
 
   const createSession = async () => {
     try {
-      const API_BASE_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:5000';
+      const API_BASE_URL = import.meta.env.VITE_BACKEND_URL || 'https://galaxy-translator.onrender.com';
       const res = await fetch(`${API_BASE_URL}/api/sessions`, { 
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

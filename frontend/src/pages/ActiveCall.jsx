@@ -44,7 +44,7 @@ const ActiveCall = () => {
   }, [messages]);
 
   useEffect(() => {
-    const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:5000';
+    const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'https://galaxy-translator.onrender.com';
     const newSocket = io(BACKEND_URL, { transports: ['websocket', 'polling'] });
     setSocket(newSocket);
 

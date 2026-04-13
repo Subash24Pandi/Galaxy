@@ -228,11 +228,9 @@ const ActiveCall = () => {
         let lastSpeechTime = Date.now();
 
         const checkAudio = () => {
-          // Use refs to check state without restarting the effect
-          if (isMuted) {
+          if (!analyser || !isRecordingRef.current && isMuted) {
             setVolume(0);
             setIsSpeaking(false);
-            if (isRecordingRef.current) stopAndSend();
             requestAnimationFrame(checkAudio);
             return;
           }
@@ -245,13 +243,17 @@ const ActiveCall = () => {
             sum += amp * amp;
           }
           const rms = Math.sqrt(sum / bufferLength);
-          setVolume(rms);
-
-          if (rms > THRESHOLD) {
-            lastSpeechTime = Date.now();
-            if (!isRecordingRef.current) startNewRecording();
+          
+          // Don't update UI volume if muted
+          if (isMuted) {
+            setVolume(0);
+            if (isRecordingRef.current) stopAndSend();
           } else {
-            if (isRecordingRef.current && (Date.now() - lastSpeechTime > SILENCE_DURATION)) {
+            setVolume(rms);
+            if (rms > THRESHOLD) {
+              lastSpeechTime = Date.now();
+              if (!isRecordingRef.current) startNewRecording();
+            } else if (isRecordingRef.current && (Date.now() - lastSpeechTime > SILENCE_DURATION)) {
               stopAndSend();
             }
           }

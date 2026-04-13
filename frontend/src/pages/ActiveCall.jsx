@@ -406,16 +406,21 @@ const ActiveCall = () => {
         
         <div style={{ width: isMobile ? '100%' : 'auto' }}>
           <button
-            onClick={() => setIsMuted(!isMuted)}
+            onClick={() => {
+              // Ensure audio context is resumed on interaction
+              if (audioContextRef.current?.state === 'suspended') audioContextRef.current.resume();
+              setIsMuted(!isMuted);
+            }}
             style={{
-              padding: '0.85rem 1.5rem', borderRadius: '14px', background: isMuted ? 'rgba(239, 68, 68, 0.12)' : 'rgba(255, 255, 255, 0.05)',
-              border: `1px solid ${isMuted ? 'rgba(239, 68, 68, 0.2)' : 'var(--glass-border)'}`,
-              color: isMuted ? '#f87171' : 'white', fontWeight: '700', cursor: 'pointer', transition: 'all 0.3s',
+              padding: '0.85rem 1.5rem', borderRadius: '14px', 
+              background: isMuted ? 'rgba(239, 68, 68, 0.12)' : 'rgba(34, 197, 94, 0.15)',
+              border: `1px solid ${isMuted ? 'rgba(239, 68, 68, 0.2)' : 'rgba(34, 197, 94, 0.3)'}`,
+              color: isMuted ? '#f87171' : '#4ade80', fontWeight: '700', cursor: 'pointer', transition: 'all 0.3s',
               display: 'flex', alignItems: 'center', gap: '0.75rem', width: isMobile ? '100%' : 'auto', justifyContent: 'center'
             }}
           >
             {isMuted ? <MicOff size={20} /> : <Mic size={20} />}
-            {isMuted ? 'Mic Off' : 'Hands-Free'}
+            {isMuted ? 'MIC MUTED - CLICK TO START' : 'MIC ACTIVE - SPEAK NOW'}
           </button>
         </div>
 

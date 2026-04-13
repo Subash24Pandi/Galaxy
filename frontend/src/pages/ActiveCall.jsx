@@ -44,7 +44,7 @@ const ActiveCall = () => {
   }, [messages]);
 
   useEffect(() => {
-    const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'https://translator-83bf.onrender.com';
+    const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'https://galaxy-translator.onrender.com';
     console.log('[Socket] Connecting to:', BACKEND_URL);
     
     const newSocket = io(BACKEND_URL, { 

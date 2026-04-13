@@ -68,7 +68,7 @@ const ActiveCall = () => {
 
     newSocket.on('error', (err) => {
       console.error('[Socket] General error:', err);
-      const errDetail = typeof err === 'object' ? JSON.stringify(err) : String(err);
+      const errDetail = err?.message || JSON.stringify(err);
       setStatus(`Error: ${errDetail}`);
     });
     

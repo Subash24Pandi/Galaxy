@@ -20,7 +20,7 @@ const synthesizeSpeech = async (text, language) => {
     body: JSON.stringify({
       inputs: [text.trim()],
       target_language_code: sarvamLang,
-      speaker: 'meera',
+      speaker: 'arya',
       model_variant: 'v1',
       speech_sample_rate: 16000
     })

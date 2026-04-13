@@ -25,6 +25,7 @@ const ActiveCall = () => {
   const streamRef = useRef(null);
   const pcmDataRef = useRef([]); // Stores raw PCM samples
   const isRecordingRef = useRef(false);
+  const chatEndRef = useRef(null); // Fixed: Restored missing ref
 
   useEffect(() => {
     const handleResize = () => setIsMobile(window.innerWidth < 768);

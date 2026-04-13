@@ -313,12 +313,9 @@ const ActiveCall = () => {
                 background: 'rgba(255,255,255,0.08)', border: '1px solid var(--glass-border)', color: 'var(--accent-secondary)'
               }}>{role.toUpperCase()}</div>
             </div>
-            {socket?.id && (
-              <div style={{ fontSize: '0.65rem', opacity: 0.5, color: 'var(--accent-primary)', display: 'flex', gap: '1rem' }}>
-                <span>Socket: {socket.id}</span>
-                <span style={{ color: status.includes('Error') ? '#f87171' : 'var(--accent-secondary)' }}>• {status}</span>
-              </div>
-            )}
+            <div style={{ fontSize: '0.65rem', opacity: 0.6, color: 'var(--accent-secondary)', fontWeight: '700', letterSpacing: '0.05em' }}>
+              • {status.toUpperCase()}
+            </div>
           </div>
         </div>
 

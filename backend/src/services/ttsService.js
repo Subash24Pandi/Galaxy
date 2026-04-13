@@ -1,52 +1,45 @@
-const fetch = require('node-fetch');
-
-/**
- * Synthesizes speech using ElevenLabs API
- * @param {string} text The text to convert to speech
- * @param {string} language The language code (e.g. 'en-IN', 'hi-IN')
- * @returns {Promise<string>} Base64 encoded audio string
- */
 const synthesizeSpeech = async (text, language) => {
-  const apiKey = process.env.ELEVENLABS_API_KEY;
-  if (!apiKey) {
-    throw new Error('ELEVENLABS_API_KEY is missing in your environment variables.');
+  const apiKey = process.env.SARVAM_API_KEY;
+  if (!apiKey || apiKey === 'your_sarvam_api_key') {
+    throw new Error('SARVAM_API_KEY is missing');
   }
 
-  // Common voice IDs
-  // Rachel: 21m00Tcm4TlvDq8ikWAM
-  // Josh: txL667pYf81YfWh74JtG
-  const voiceId = '21m00Tcm4TlvDq8ikWAM'; 
+  if (!text || text.trim() === '') {
+    throw new Error('TTS: No text provided');
+  }
 
-  const response = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`, {
+  // Ensure format is 'xx-IN'
+  const sarvamLang = language.includes('-IN') ? language : `${language}-IN`;
+
+  const response = await fetch('https://api.sarvam.ai/text-to-speech', {
     method: 'POST',
     headers: {
-      'Accept': 'audio/mpeg',
       'Content-Type': 'application/json',
-      'xi-api-key': apiKey
+      'api-subscription-key': apiKey
     },
     body: JSON.stringify({
-      text: text,
-      model_id: 'eleven_multilingual_v2', // Best for hi-IN, en-IN etc.
-      voice_settings: {
-        stability: 0.5,
-        similarity_boost: 0.75
-      }
+      inputs: [text.trim()],
+      target_language_code: sarvamLang,
+      speaker: 'arya',
+      model_variant: 'v1',
+      speech_sample_rate: 16000
     })
   });
 
   if (!response.ok) {
-    const errorBody = await response.text();
-    // Catch the dreaded 403 Forbidden (Render IP Block)
-    if (response.status === 403) {
-      console.error('[TTS] ElevenLabs 403 Forbidden - Render IP is likely blocked.');
-      throw new Error('ElevenLabs 403: Render IP addresses are currently blocked by ElevenLabs.');
-    }
-    throw new Error(`ElevenLabs API Error (${response.status}): ${errorBody}`);
+    const errText = await response.text();
+    console.error(`[TTS] Sarvam TTS Error: ${response.status}`, errText);
+    throw new Error(`Sarvam TTS Error: ${response.status} - ${errText}`);
   }
 
-  const arrayBuffer = await response.arrayBuffer();
-  const buffer = Buffer.from(arrayBuffer);
-  return buffer.toString('base64');
+  const data = await response.json();
+  const base64 = data.audios[0]; 
+
+  if (!base64) {
+    throw new Error('Sarvam TTS returned empty audio list');
+  }
+
+  return base64;
 };
 
 module.exports = { synthesizeSpeech };

@@ -79,10 +79,49 @@ const ActiveCall = () => {
     
     newSocket.on('audio_playback', (data) => {
       if (data.targetRole === role && data.audioBase64) {
-        const audio = new Audio(`data:audio/mp3;base64,${data.audioBase64}`);
-        audio.play().catch((e) => console.error('Audio playback failed:', e));
+        console.log('[Socket] Audio received, playing...');
+        playPcmAudio(data.audioBase64);
       }
     });
+
+    // Helper: Wrap raw PCM in a WAV header so the browser can play it
+    const playPcmAudio = (base64) => {
+      try {
+        const binaryString = window.atob(base64);
+        const len = binaryString.length;
+        const bytes = new Uint8Array(len);
+        for (let i = 0; i < len; i++) bytes[i] = binaryString.charCodeAt(i);
+
+        const wavHeader = new ArrayBuffer(44);
+        const view = new DataView(wavHeader);
+        
+        // RIFF chunk descriptor
+        view.setUint32(0, 0x52494646, false); // "RIFF"
+        view.setUint32(4, 36 + len, true);
+        view.setUint32(8, 0x57415645, false); // "WAVE"
+        
+        // fmt sub-chunk
+        view.setUint32(12, 0x666d7420, false); // "fmt "
+        view.setUint32(16, 16, true); // Subchunk1Size
+        view.setUint16(20, 1, true);  // AudioFormat (1 = PCM)
+        view.setUint16(22, 1, true);  // NumChannels
+        view.setUint32(24, 16000, true); // SampleRate (Sarvam default)
+        view.setUint32(28, 16000 * 2, true); // ByteRate
+        view.setUint16(32, 2, true);  // BlockAlign
+        view.setUint16(34, 16, true); // BitsPerSample
+        
+        // data sub-chunk
+        view.setUint32(36, 0x64617461, false); // "data"
+        view.setUint32(40, len, true);
+
+        const blob = new Blob([wavHeader, bytes], { type: 'audio/wav' });
+        const url = URL.createObjectURL(blob);
+        const audio = new Audio(url);
+        audio.play().catch(e => console.error('Playback failed:', e));
+      } catch (e) {
+        console.error('Audio processing failed:', e);
+      }
+    };
 
     return () => {
       console.log('[Socket] Disconnecting...');
@@ -140,6 +179,7 @@ const ActiveCall = () => {
     };
 
     mediaRecorder.start();
+    console.log('[VAD] --- RECORDING STARTED ---');
     isRecordingRef.current = true;
     setIsSpeaking(true);
   }, [isMuted, socket, id, role]);

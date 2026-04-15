@@ -13,30 +13,26 @@ const handleAudioUtterance = async (req, res) => {
 
   try {
     console.log(`[Socket-Pipeline] [${role}] in ${sessionId}: ${inputLang} -> ${outputLang}`);
-    
+
     // Ensure session exists in DB (Auto-create if joined manually)
     await createSession(sessionId);
 
-    
+
     // 1. Transcription (STT)
     const originalText = await sttService.transcribeAudio(audioBase64, inputLang);
     if (!originalText) throw new Error('Could not understand audio');
-    console.log(`[Pipeline] STT Step Done: "${originalText.substring(0, 50)}..."`);
 
     // 2. Translation
     const targetRole = role === 'agent' ? 'customer' : 'agent';
     const translatedText = await translationService.translateText(originalText, inputLang, outputLang);
-    console.log(`[Pipeline] Translation Step Done: "${translatedText.substring(0, 50)}..."`);
 
     // 3. Synthesis (TTS)
-    console.log(`[Pipeline] TTS Synthesis Starting for: ${outputLang}...`);
     const ttsAudio = await ttsService.synthesizeSpeech(translatedText, outputLang);
-    console.log(`[Pipeline] TTS Synthesis Done. Size: ${ttsAudio.length} bytes`);
 
     // 4. Distribute to room via Socket.io
     const timestamp = new Date().toISOString();
     const room = `session-${sessionId}`;
-    
+
     // Emit transcript update
     io.to(room).emit('transcript_update', {
       role,
@@ -65,12 +61,12 @@ const handleAudioUtterance = async (req, res) => {
     res.json({ success: true, text: originalText });
   } catch (error) {
     console.error('[Socket-Pipeline] Error:', error.message);
-    
+
     // Notify the room of the error
-    io.to(`session-${sessionId}`).emit('session_status', { 
-      message: `AI Error: ${error.message}` 
+    io.to(`session-${sessionId}`).emit('session_status', {
+      message: `AI Error: ${error.message}`
     });
-    
+
     res.status(500).json({ success: false, message: error.message });
   }
 };

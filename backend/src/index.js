@@ -12,21 +12,33 @@ const sessionRoutes = require('./routes/sessionRoutes');
 const { createSession, updateSessionLanguage } = require('./models/sessionModel');
 
 
-const allowedOrigins = [
-  'http://localhost:5173',
-  'http://localhost:3000',
-  'https://galaxy-silk-one.vercel.app'
-];
+const isAllowedOrigin = (origin) => {
+  if (!origin) return true;
+  if (origin.startsWith('http://localhost')) return true;
+  if (origin.endsWith('.vercel.app')) return true;
+  return false;
+};
 
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: {
-    origin: allowedOrigins,
+    origin: (origin, callback) => {
+      if (isAllowedOrigin(origin)) callback(null, true);
+      else callback(new Error('CORS blocked'));
+    },
     methods: ['GET', 'POST'],
     credentials: true
   }
 });
+
+// Production Audit Logs (Masked)
+console.log('--- CLOUD STARTUP AUDIT ---');
+console.log(`[Audit] Port: ${process.env.PORT || 5000}`);
+console.log(`[Audit] DB_URL: ${process.env.DATABASE_URL ? 'PRESENT (Masked)' : 'MISSING 🔴'}`);
+console.log(`[Audit] Sarvam Key: ${process.env.SARVAM_API_KEY ? 'OK: ' + process.env.SARVAM_API_KEY.substring(0, 5) + '...' : 'MISSING 🔴'}`);
+console.log(`[Audit] ElevenLabs Key: ${process.env.ELEVENLABS_API_KEY ? 'OK: ' + process.env.ELEVENLABS_API_KEY.substring(0, 5) + '...' : 'MISSING 🔴'}`);
+console.log('---------------------------');
 
 // Provide io instance to controllers via app
 app.set('io', io);
@@ -36,12 +48,9 @@ app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ limit: '10mb', extended: true }));
 
 app.use(cors({
-  origin: function (origin, callback) {
-    if (!origin || allowedOrigins.indexOf(origin) !== -1) {
-      callback(null, true);
-    } else {
-      callback(new Error('Not allowed by CORS'));
-    }
+  origin: (origin, callback) => {
+    if (isAllowedOrigin(origin)) callback(null, true);
+    else callback(new Error('CORS blocked'));
   },
   methods: ['GET', 'POST'],
   credentials: true

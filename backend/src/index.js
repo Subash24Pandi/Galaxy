@@ -120,8 +120,9 @@ app.get('/api/health', async (req, res) => {
   res.json(health);
 });
 
-const startServer = async () => {
+const startDatabase = async () => {
   try {
+    console.log('[Galaxy] Connecting to Database...');
     await connectDB();
     
     // Deep Harmonization: Ensure columns match the new schema regardless of local state
@@ -130,21 +131,14 @@ const startServer = async () => {
       BEGIN 
         -- 1. Harmonize sessions table
         IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='sessions' AND column_name='session_id') THEN
-          -- Check if it's the primary key, if so rename, if not just drop or make nullable
           BEGIN
             ALTER TABLE sessions RENAME COLUMN session_id TO id;
           EXCEPTION WHEN others THEN
-            -- If 'id' already exists, 'session_id' is redundant/stale
             ALTER TABLE sessions ALTER COLUMN session_id DROP NOT NULL;
           END;
         END IF;
 
-        -- 2. Harmonize messages table
-        IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='messages' AND column_name='id' AND table_name='messages' AND column_name NOT IN (SELECT column_name FROM information_schema.columns WHERE table_name='messages' AND column_name='session_id')) THEN
-          -- If 'id' is used for session reference incorrectly, we fix it
-        END IF;
-
-        -- 3. Add Lang Columns
+        -- 2. Add Lang Columns
         IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='sessions' AND column_name='agent_lang') THEN
           ALTER TABLE sessions ADD COLUMN agent_lang VARCHAR(10) DEFAULT 'ta';
         END IF;
@@ -152,7 +146,7 @@ const startServer = async () => {
           ALTER TABLE sessions ADD COLUMN customer_lang VARCHAR(10) DEFAULT 'en';
         END IF;
 
-        -- 4. Fix Constraints
+        -- 3. Fix Constraints
         ALTER TABLE messages DROP CONSTRAINT IF EXISTS messages_session_id_fkey;
         ALTER TABLE sessions ALTER COLUMN id TYPE VARCHAR(100);
         ALTER TABLE messages ALTER COLUMN session_id TYPE VARCHAR(100);
@@ -162,18 +156,17 @@ const startServer = async () => {
         END IF;
       END $$;
     `).catch(e => console.warn('[Migration] Deep Harmonization Handled:', e.message));
-
-    const PORT = process.env.PORT || 5000;
-
-    server.listen(PORT, () => {
-      console.log(`[Galaxy-Local] Server listening on port ${PORT}`);
-    });
-
-
+    console.log('[Galaxy] Database Connected & Harmonized.');
   } catch (error) {
-    console.error('[Galaxy] Startup failed:', error);
+    console.error('[Galaxy] Database Connection Failed:', error.message);
   }
 };
 
-startServer();
+// Start the server immediately to avoid Render 502/CORS issues
+const PORT = process.env.PORT || 5000;
+server.listen(PORT, () => {
+  console.log(`[Galaxy] Server listening on port ${PORT}`);
+  // Start the database connection in the background
+  startDatabase();
+});
 

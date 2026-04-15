@@ -8,42 +8,45 @@ const Home = () => {
   const [customStartId, setCustomStartId] = useState('');
   const [recentSessions, setRecentSessions] = useState([]);
   const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
-  const [health, setHealth] = useState({ database: 'checking', redis: 'checking' });
+  const [health, setHealth] = useState({ database: 'checking', pipeline: 'checking' });
 
   useEffect(() => {
     const handleResize = () => setIsMobile(window.innerWidth < 768);
     window.addEventListener('resize', handleResize);
     
-    const API_BASE_URL = import.meta.env.VITE_BACKEND_URL || 'https://galaxy-translator.onrender.com';
+    const API_BASE_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:5000';
 
     const fetchRecent = async () => {
       try {
         const res = await fetch(`${API_BASE_URL}/api/sessions/recent`);
         const data = await res.json();
         if (data.success) setRecentSessions(data.sessions);
-      } catch (err) {
-        console.error('Failed to fetch recent sessions');
-      }
+      } catch (err) { console.error('Recent fail'); }
     };
 
     const checkHealth = async () => {
       try {
         const res = await fetch(`${API_BASE_URL}/api/health`);
         const data = await res.json();
-        setHealth(data.services);
+        setHealth(data);
       } catch (err) {
-        setHealth({ database: 'error', redis: 'error' });
+        setHealth({ database: 'error', pipeline: 'error' });
       }
     };
 
     fetchRecent();
     checkHealth();
-    return () => window.removeEventListener('resize', handleResize);
+    const interval = setInterval(checkHealth, 30000);
+
+    return () => {
+      window.removeEventListener('resize', handleResize);
+      clearInterval(interval);
+    };
   }, []);
 
   const createSession = async () => {
     try {
-      const API_BASE_URL = import.meta.env.VITE_BACKEND_URL || 'https://galaxy-translator.onrender.com';
+      const API_BASE_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:5000';
       const res = await fetch(`${API_BASE_URL}/api/sessions`, { 
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -54,98 +57,96 @@ const Home = () => {
         navigate(`/session/${data.session.id}/setup`);
       }
     } catch (err) {
-      console.error(err);
-      const fakeId = customStartId.trim() || Math.random().toString(36).substring(2, 9);
+      const fakeId = customStartId.trim() || Math.random().toString(36).substring(2, 10);
       navigate(`/session/${fakeId}/setup`);
     }
   };
 
   const joinSession = (e) => {
     e.preventDefault();
-    if (joinId.trim()) {
-      navigate(`/session/${joinId.trim()}/setup`);
-    }
+    if (joinId.trim()) navigate(`/session/${joinId.trim()}/setup`);
   };
 
   return (
-    <div className="flex-center" style={{ flexDirection: 'column', padding: isMobile ? '2rem 1rem' : '4rem 2rem', position: 'relative' }}>
+    <div className="flex-center" style={{ minHeight: '100vh', position: 'relative', padding: isMobile ? '1rem' : '2rem' }}>
       
       {/* System Health Badge */}
       <div className="glass-panel" style={{ 
-        position: 'absolute', top: '2rem', right: '2rem', padding: '0.75rem 1rem', 
-        display: isMobile ? 'none' : 'flex', gap: '1.25rem', borderRadius: '14px', fontSize: '0.75rem', fontWeight: '700'
+        position: 'absolute', top: '2rem', right: '2rem', padding: '0.6rem 1rem', 
+        display: isMobile ? 'none' : 'flex', gap: '1.25rem', borderRadius: '12px', fontSize: '0.65rem', fontWeight: '800',
+        border: '1px solid rgba(255,255,255,0.05)', letterSpacing: '0.05em'
       }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-          {health.database === 'up' ? <CheckCircle size={14} color="#4ade80" /> : <XCircle size={14} color="#f87171" />}
-          <span style={{ color: health.database === 'up' ? 'var(--text-primary)' : 'var(--text-muted)' }}>DATABASE</span>
+          <div style={{ width: '6px', height: '6px', borderRadius: '50%', background: health.database === 'up' ? '#10b981' : health.database === 'checking' ? '#f59e0b' : '#ef4444', boxShadow: health.database === 'up' ? '0 0 10px #10b981' : 'none' }}></div>
+          <span style={{ color: health.database === 'up' ? 'white' : 'var(--text-muted)' }}>DATABASE</span>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-          {health.redis === 'up' ? <CheckCircle size={14} color="#4ade80" /> : <XCircle size={14} color="#f87171" />}
-          <span style={{ color: health.redis === 'up' ? 'var(--text-primary)' : 'var(--text-muted)' }}>PIPELINE</span>
+          <div style={{ width: '6px', height: '6px', borderRadius: '50%', background: health.pipeline === 'up' ? '#10b981' : health.pipeline === 'checking' ? '#f59e0b' : '#ef4444', boxShadow: health.pipeline === 'up' ? '0 0 10px #10b981' : 'none' }}></div>
+          <span style={{ color: health.pipeline === 'up' ? 'white' : 'var(--text-muted)' }}>PIPELINE</span>
         </div>
       </div>
+      {/* Cinematic Background Elements */}
+      <div style={{ position: 'fixed', top: '10%', left: '10%', width: '400px', height: '400px', background: 'var(--accent-primary)', filter: 'blur(150px)', opacity: 0.05, borderRadius: '50%', zIndex: -1 }}></div>
+      <div style={{ position: 'fixed', bottom: '10%', right: '10%', width: '400px', height: '400px', background: 'var(--accent-secondary)', filter: 'blur(150px)', opacity: 0.05, borderRadius: '50%', zIndex: -1 }}></div>
 
-      <div className="container" style={{ maxWidth: '1000px' }}>
+      <div className="container animate-fade-in" style={{ maxWidth: '1200px', position: 'relative' }}>
         
         {/* Hero Section */}
-        <div className="animate-fade-in" style={{ textAlign: 'center', marginBottom: isMobile ? '2.5rem' : '4rem' }}>
-          <div style={{ position: 'relative', display: 'inline-block', marginBottom: '2rem' }}>
-            <div style={{ 
-              position: 'absolute', inset: '-20px', background: 'var(--accent-primary)', 
-              filter: 'blur(40px)', opacity: 0.2, borderRadius: '50%'
-            }}></div>
-            <div style={{
-              width: isMobile ? '64px' : '80px', height: isMobile ? '64px' : '80px', 
-              borderRadius: '22px', background: 'rgba(99, 102, 241, 0.1)',
-              display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid var(--glass-border)',
-              position: 'relative'
-            }}>
-              <Globe size={isMobile ? 32 : 40} className="gradient-text" style={{ color: '#818cf8' }} />
+        <div style={{ textAlign: 'center', marginBottom: isMobile ? '3rem' : '6rem', paddingTop: '4rem' }}>
+          <div className="hover-glow" style={{ position: 'relative', display: 'inline-block', marginBottom: '3rem' }}>
+            <div style={{ position: 'absolute', inset: '-30px', background: 'var(--accent-primary)', filter: 'blur(50px)', opacity: 0.15, borderRadius: '50%' }}></div>
+            <div className="glass-panel" style={{ width: '100px', height: '100px', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid rgba(255,255,255,0.1)' }}>
+              <Globe size={48} color="var(--accent-secondary)" />
             </div>
           </div>
 
-          <h1 style={{ fontSize: isMobile ? '2.5rem' : '4.5rem', marginBottom: '1.5rem', lineHeight: '1.1' }} className="gradient-text">
-            {isMobile ? 'Global Communication' : <>The Future of <br /> Global Communication</>}
+          <h1 style={{ fontSize: isMobile ? '2.8rem' : '5rem', fontWeight: '700', lineHeight: '1', marginBottom: '1.5rem' }}>
+            Voice Translation <br />
+            <span className="gradient-text">Without Limits</span>
           </h1>
           
-          <p style={{ color: 'var(--text-secondary)', fontSize: isMobile ? '1rem' : '1.25rem', marginBottom: '3rem', maxWidth: '600px', margin: '0 auto 3rem' }}>
-            Break language barriers instantly with our high-fidelity AI voice translation platform. 
+          <p style={{ color: 'var(--text-secondary)', fontSize: '1.25rem', marginBottom: '4rem', maxWidth: '650px', margin: '0 auto 4rem' }}>
+            Connect with anyone, anywhere. High-fidelity, real-time voice bridge powered by state-of-the-art AI.
           </p>
 
-          <div style={{ display: 'flex', flexDirection: isMobile ? 'column' : 'row', justifyContent: 'center', gap: '1.5rem', alignItems: 'center' }}>
+          <div style={{ display: 'flex', flexDirection: isMobile ? 'column' : 'row', justifyContent: 'center', gap: '2rem', alignItems: 'center' }}>
             
-            {/* Create Group */}
-            <div className="glass-panel" style={{ display: 'flex', padding: '0.5rem', borderRadius: '16px', width: isMobile ? '100%' : 'auto' }}>
-              <div style={{ display: 'flex', gap: '0.5rem', width: '100%' }}>
+            {/* Create Card */}
+            <div className="glass-panel" style={{ padding: '1.5rem', width: isMobile ? '100%' : '380px', textAlign: 'left' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginBottom: '1.5rem' }}>
+                <Activity size={20} color="var(--accent-primary)" />
+                <span style={{ fontWeight: '700', fontSize: '1.1rem' }}>Create Session</span>
+              </div>
+              <div style={{ display: 'flex', gap: '0.75rem' }}>
                 <input 
                   type="text" 
-                  placeholder="Custom Agent ID (optional)" 
+                  placeholder="Custom ID (Optional)" 
                   value={customStartId}
                   onChange={(e) => setCustomStartId(e.target.value)}
-                  style={{ border: 'none', background: 'transparent', width: isMobile ? '100%' : '220px' }}
+                  style={{ flex: 1 }}
                 />
-                <button 
-                  onClick={createSession} 
-                  className="btn-primary" 
-                  style={{ border: 'none', padding: '0.75rem 1.5rem', whiteSpace: 'nowrap' }}
-                >
-                  <PlusCircle size={18} /> Start
+                <button onClick={createSession} className="btn-primary" style={{ padding: '0 1.5rem' }}>
+                  <PlusCircle size={20} />
                 </button>
               </div>
             </div>
 
-            {/* Join Group */}
-            <div className="glass-panel" style={{ display: 'flex', padding: '0.5rem', borderRadius: '16px', width: isMobile ? '100%' : 'auto' }}>
-              <form onSubmit={joinSession} style={{ display: 'flex', gap: '0.5rem', width: '100%' }}>
+            {/* Join Card */}
+            <div className="glass-panel" style={{ padding: '1.5rem', width: isMobile ? '100%' : '380px', textAlign: 'left' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginBottom: '1.5rem' }}>
+                <Users size={20} color="var(--accent-secondary)" />
+                <span style={{ fontWeight: '700', fontSize: '1.1rem' }}>Join Bridge</span>
+              </div>
+              <form onSubmit={joinSession} style={{ display: 'flex', gap: '0.75rem' }}>
                 <input 
                   type="text" 
-                  placeholder="Join ID..." 
+                  placeholder="Enter Session ID..." 
                   value={joinId}
                   onChange={(e) => setJoinId(e.target.value)}
-                  style={{ border: 'none', background: 'transparent', width: isMobile ? '100%' : '180px' }}
+                  style={{ flex: 1 }}
                 />
-                <button type="submit" className="btn-outline" style={{ border: 'none', background: 'var(--accent-primary)', color: 'white', whiteSpace: 'nowrap' }}>
-                  Join <ArrowRight size={18} />
+                <button type="submit" className="btn-secondary" style={{ padding: '0 1.5rem' }}>
+                  <ArrowRight size={20} />
                 </button>
               </form>
             </div>
@@ -153,42 +154,33 @@ const Home = () => {
           </div>
         </div>
 
-        {/* Recent Activity Section */}
+        {/* Activity Section */}
         {recentSessions.length > 0 && (
-          <div className="animate-fade-in" style={{ animationDelay: '0.3s' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '1.5rem', color: 'var(--text-secondary)' }}>
-              <History size={20} />
-              <h3 style={{ fontSize: '1.1rem', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.1em' }}>Recent Activity</h3>
+          <div style={{ animationDelay: '0.4s' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginBottom: '2.5rem' }}>
+              <Clock size={20} color="var(--text-muted)" />
+              <h3 style={{ textTransform: 'uppercase', letterSpacing: '0.2em', color: 'var(--text-secondary)', fontSize: '0.85rem' }}>Recently Joined</h3>
+              <div style={{ flex: 1, height: '1px', background: 'var(--glass-border)' }}></div>
             </div>
             
-            <div style={{ 
-              display: 'grid', 
-              gridTemplateColumns: isMobile ? '1fr' : 'repeat(auto-fill, minmax(300px, 1fr))', 
-              gap: '1.25rem'
-            }}>
+            <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'repeat(auto-fill, minmax(340px, 1fr))', gap: '1.5rem' }}>
               {recentSessions.map((session) => (
                 <div 
                   key={session.id} 
                   className="glass-panel" 
                   onClick={() => navigate(`/session/${session.id}/setup`)}
-                  style={{ 
-                    padding: '1.25rem', cursor: 'pointer', display: 'flex', 
-                    alignItems: 'center', justifyContent: 'space-between'
-                  }}
+                  style={{ padding: '1.5rem', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'space-between', border: '1px solid rgba(255,255,255,0.05)' }}
                 >
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-                    <div style={{ 
-                      width: '40px', height: '40px', borderRadius: '10px', background: 'rgba(255,255,255,0.05)',
-                      display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid var(--glass-border)'
-                    }}>
-                      <Clock size={18} color="var(--accent-secondary)" />
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '1.25rem' }}>
+                    <div style={{ width: '48px', height: '48px', borderRadius: '14px', background: 'rgba(255,255,255,0.03)', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid var(--glass-border)' }}>
+                      <Activity size={20} color="var(--accent-secondary)" />
                     </div>
                     <div>
-                      <div style={{ fontWeight: '600', fontSize: '0.9rem' }}>ID: {session.id.substring(0, 15)}...</div>
-                      <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>{new Date(session.created_at).toLocaleDateString()}</div>
+                      <div style={{ fontWeight: '700', fontSize: '1rem', marginBottom: '0.25rem' }}>{session.id.substring(0, 12)}</div>
+                      <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{new Date(session.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} • Active</div>
                     </div>
                   </div>
-                  <ArrowRight size={16} color="var(--text-muted)" />
+                  <ArrowRight size={18} color="var(--text-muted)" />
                 </div>
               ))}
             </div>
@@ -197,6 +189,7 @@ const Home = () => {
       </div>
     </div>
   );
+
 };
 
 export default Home;

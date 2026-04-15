@@ -18,9 +18,18 @@ END $$;
 
 CREATE TABLE IF NOT EXISTS sessions (
   id VARCHAR(100) PRIMARY KEY,
+  agent_lang VARCHAR(10) DEFAULT 'en',
+  customer_lang VARCHAR(10) DEFAULT 'en',
   status VARCHAR(50) DEFAULT 'active',
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+
+-- Ensure columns exist for older local DBs
+ALTER TABLE sessions ADD COLUMN IF NOT EXISTS status VARCHAR(50) DEFAULT 'active';
+ALTER TABLE sessions ADD COLUMN IF NOT EXISTS agent_lang VARCHAR(10) DEFAULT 'en';
+ALTER TABLE sessions ADD COLUMN IF NOT EXISTS customer_lang VARCHAR(10) DEFAULT 'en';
+
+
 
 CREATE TABLE IF NOT EXISTS messages (
   id UUID PRIMARY KEY,

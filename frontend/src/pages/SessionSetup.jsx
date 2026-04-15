@@ -1,6 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { Settings, CheckCircle2, User, UserCog, Languages, Sparkles, ChevronRight } from 'lucide-react';
+import { Settings, CheckCircle2, User, UserCog, Languages, Sparkles, ChevronRight, Activity } from 'lucide-react';
+import io from 'socket.io-client';
 
 const LANGUAGES = [
   { code: 'en', name: 'English', flag: '🇺🇸' },
@@ -9,9 +10,6 @@ const LANGUAGES = [
   { code: 'te', name: 'Telugu', flag: '🇮🇳' },
   { code: 'kn', name: 'Kannada', flag: '🇮🇳' },
   { code: 'bn', name: 'Bengali', flag: '🇮🇳' },
-  { code: 'od', name: 'Odiya', flag: '🇮🇳' },
-  { code: 'as', name: 'Assamese', flag: '🇮🇳' },
-  { code: 'bho', name: 'Bhojpuri', flag: '🇮🇳' },
   { code: 'gu', name: 'Gujarati', flag: '🇮🇳' },
   { code: 'mr', name: 'Marathi', flag: '🇮🇳' }
 ];
@@ -20,127 +18,137 @@ const SessionSetup = () => {
   const { id } = useParams();
   const navigate = useNavigate();
   const [role, setRole] = useState('agent');
-  const [inputLang, setInputLang] = useState('en');
-  const [outputLang, setOutputLang] = useState('hi');
+  const [inputLang, setInputLang] = useState('ta');
+  const [peerLang, setPeerLang] = useState(null);
   const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
+  const socketRef = useRef(null);
 
   useEffect(() => {
     const handleResize = () => setIsMobile(window.innerWidth < 768);
     window.addEventListener('resize', handleResize);
-    return () => window.removeEventListener('resize', handleResize);
-  }, []);
+    
+    // Connect socket for real-time language sync
+    const API_BASE_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:5000';
+    socketRef.current = io(API_BASE_URL);
+    
+    socketRef.current.emit('join-session', { sessionId: id, role: 'setup' });
+    
+    socketRef.current.on('peer_language_updated', ({ lang }) => {
+      setPeerLang(lang);
+    });
+
+    return () => {
+      window.removeEventListener('resize', handleResize);
+      socketRef.current.disconnect();
+    };
+  }, [id]);
+
+  const handleLangChange = (code) => {
+    setInputLang(code);
+    socketRef.current.emit('update_language', { sessionId: id, role, lang: code });
+  };
 
   const joinCall = (e) => {
     e.preventDefault();
+    // In Zero-Config, my outputLang is whatever the Peer speaks. 
+    // If peer hasn't selected yet, we default (will be updated live in ActiveCall)
     navigate(`/session/${id}/call`, { 
-      state: { role, inputLang, outputLang } 
+      state: { role, inputLang, outputLang: peerLang || 'en' } 
     });
   };
 
   return (
-    <div className="flex-center" style={{ padding: isMobile ? '2rem 1rem' : '4rem 2rem' }}>
-      <div className="container" style={{ maxWidth: '900px' }}>
-        <div className="glass-panel animate-fade-in" style={{ padding: isMobile ? '1.5rem' : '4rem' }}>
+    <div className="flex-center" style={{ padding: isMobile ? '1rem' : '4rem' }}>
+      <div className="container animate-fade-in" style={{ maxWidth: '1000px' }}>
+        <div className="glass-panel" style={{ padding: isMobile ? '2rem' : '4rem', position: 'relative', overflow: 'hidden' }}>
           
-          <div style={{ display: 'flex', alignItems: 'center', gap: '1.25rem', marginBottom: isMobile ? '2rem' : '3.5rem' }}>
-            <div style={{ 
-              width: isMobile ? '48px' : '64px', height: isMobile ? '48px' : '64px', borderRadius: '14px', background: 'rgba(99, 102, 241, 0.1)',
-              display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid var(--glass-border)'
-            }}>
-              <Settings size={isMobile ? 24 : 32} color="var(--accent-primary)" />
+          <div style={{ display: 'flex', alignItems: 'center', gap: '1.5rem', marginBottom: '4rem' }}>
+            <div className="hover-glow" style={{ width: '64px', height: '64px', borderRadius: '18px', background: 'rgba(99, 102, 241, 0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid var(--glass-border)' }}>
+              <Settings size={32} color="var(--accent-primary)" />
             </div>
             <div>
-              <h1 style={{ fontSize: isMobile ? '1.75rem' : '2.5rem', fontWeight: '700' }}>Setup</h1>
-              <p style={{ color: 'var(--text-secondary)', fontSize: isMobile ? '0.85rem' : '1rem' }}>Configure preferences.</p>
+              <h1 style={{ fontSize: '2.5rem', fontWeight: '700' }}>Bridge Setup</h1>
+              <p style={{ color: 'var(--text-secondary)' }}>Session ID: <span style={{ color: 'var(--accent-secondary)', fontWeight: '700' }}>{id}</span></p>
             </div>
           </div>
 
-          <form onSubmit={joinCall} style={{ display: 'flex', flexDirection: 'column', gap: isMobile ? '2rem' : '3rem' }}>
+          <form onSubmit={joinCall} style={{ display: 'flex', flexDirection: 'column', gap: '4rem' }}>
             
             {/* Role Selection */}
-            <div>
-              <label style={{ display: 'block', marginBottom: '1.25rem', fontWeight: '700', fontSize: '1.1rem', color: 'var(--text-primary)' }}>1. Identity</label>
-              <div style={{ display: 'flex', flexDirection: isMobile ? 'column' : 'row', gap: '1rem' }}>
-                {[
-                  { id: 'agent', label: 'Agent', icon: UserCog, desc: 'Internal' },
-                  { id: 'customer', label: 'Customer', icon: User, desc: 'External' }
-                ].map((r) => (
-                  <div 
-                    key={r.id}
-                    onClick={() => setRole(r.id)}
-                    style={{ 
-                      flex: 1, cursor: 'pointer', padding: isMobile ? '1.25rem' : '2rem', borderRadius: '24px',
-                      background: role === r.id ? 'rgba(99, 102, 241, 0.12)' : 'rgba(255, 255, 255, 0.02)',
-                      border: `2px solid ${role === r.id ? 'var(--accent-primary)' : 'var(--glass-border)'}`,
-                      transition: 'var(--transition)', textAlign: 'center',
-                      position: 'relative'
-                    }}
-                  >
-                    {role === r.id && <div style={{ position: 'absolute', top: '12px', right: '12px' }}><CheckCircle2 size={18} color="var(--accent-primary)" /></div>}
-                    <r.icon size={isMobile ? 32 : 48} style={{ marginBottom: '1rem', color: role === r.id ? 'var(--accent-primary)' : 'var(--text-muted)' }} />
-                    <div style={{ fontWeight: '700', fontSize: isMobile ? '1rem' : '1.2rem', color: role === r.id ? 'white' : 'var(--text-secondary)' }}>{r.label}</div>
+            <div style={{ display: 'flex', flexDirection: isMobile ? 'column' : 'row', gap: '1.5rem' }}>
+              {[
+                { id: 'agent', label: 'Internal Agent', icon: UserCog },
+                { id: 'customer', label: 'External Customer', icon: User }
+              ].map((r) => (
+                <div 
+                  key={r.id}
+                  onClick={() => setRole(r.id)}
+                  className="glass-panel"
+                  style={{ 
+                    flex: 1, cursor: 'pointer', padding: '2rem', textAlign: 'center',
+                    background: role === r.id ? 'rgba(99, 102, 241, 0.1)' : 'transparent',
+                    borderColor: role === r.id ? 'var(--accent-primary)' : 'var(--glass-border)',
+                    position: 'relative'
+                  }}
+                >
+                  {role === r.id && <div style={{ position: 'absolute', top: '1rem', right: '1rem' }}><CheckCircle2 size={20} color="var(--accent-primary)" /></div>}
+                  <r.icon size={48} style={{ marginBottom: '1.5rem', color: role === r.id ? 'var(--accent-primary)' : 'var(--text-muted)' }} />
+                  <div style={{ fontWeight: '700', fontSize: '1.25rem' }}>{r.label}</div>
+                </div>
+              ))}
+            </div>
+
+            {/* Language Selection */}
+            <div style={{ display: 'flex', flexDirection: isMobile ? 'column' : 'row', gap: '3rem' }}>
+              <div style={{ flex: 1 }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '2rem' }}>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', fontWeight: '700', fontSize: '1.2rem' }}>
+                    <Languages size={22} color="var(--accent-secondary)" /> What is your Language?
+                  </label>
+                </div>
+                
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))', gap: '1rem' }}>
+                  {LANGUAGES.map(l => (
+                    <div 
+                      key={l.code}
+                      onClick={() => handleLangChange(l.code)}
+                      className="glass-panel"
+                      style={{
+                        padding: '1.25rem', cursor: 'pointer',
+                        background: inputLang === l.code ? 'var(--accent-primary)' : 'rgba(255,255,255,0.02)',
+                        border: '1px solid',
+                        borderColor: inputLang === l.code ? 'var(--accent-primary)' : 'var(--glass-border)',
+                        display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.5rem', transition: 'var(--transition)'
+                      }}
+                    >
+                      <span style={{ fontSize: '1.5rem' }}>{l.flag}</span>
+                      <span style={{ fontSize: '0.9rem', fontWeight: '600' }}>{l.name}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Status Indicator */}
+              <div className="glass-panel" style={{ width: isMobile ? '100%' : '300px', padding: '2rem', display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', textAlign: 'center', background: 'rgba(255,255,255,0.01)' }}>
+                {peerLang ? (
+                  <div className="animate-fade-in">
+                    <Sparkles size={32} color="var(--accent-secondary)" style={{ marginBottom: '1rem' }} />
+                    <div style={{ fontSize: '0.9rem', color: 'var(--text-secondary)', marginBottom: '0.5rem' }}>Peer Detected!</div>
+                    <div style={{ fontWeight: '800', fontSize: '1.4rem' }}>
+                      {LANGUAGES.find(l => l.code === peerLang)?.flag} {LANGUAGES.find(l => l.code === peerLang)?.name}
+                    </div>
                   </div>
-                ))}
+                ) : (
+                  <div style={{ color: 'var(--text-muted)' }}>
+                    <Activity size={32} style={{ marginBottom: '1rem', opacity: 0.5 }} className="pulse-recording" />
+                    <p style={{ fontSize: '0.9rem' }}>Waiting for Peer...</p>
+                  </div>
+                )}
               </div>
             </div>
 
-            {/* Language Grid */}
-            <div style={{ display: 'flex', flexDirection: isMobile ? 'column' : 'row', gap: '2rem' }}>
-              <div style={{ flex: 1 }}>
-                <label style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '1.25rem', fontWeight: '700', fontSize: '1.1rem' }}>
-                  <Languages size={20} color="var(--accent-tertiary)" /> 2. You Speak
-                </label>
-                <div style={{ 
-                  display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'repeat(2, 1fr)', gap: '0.75rem',
-                  maxHeight: isMobile ? '200px' : '300px', overflowY: 'auto', paddingRight: '0.5rem'
-                }}>
-                  {LANGUAGES.map(l => (
-                    <div 
-                      key={l.code}
-                      onClick={() => setInputLang(l.code)}
-                      style={{
-                        padding: '1rem', borderRadius: '14px', cursor: 'pointer',
-                        background: inputLang === l.code ? 'var(--accent-primary)' : 'rgba(255,255,255,0.03)',
-                        border: '1px solid var(--glass-border)', transition: 'var(--transition)',
-                        display: 'flex', alignItems: 'center', gap: '0.75rem'
-                      }}
-                    >
-                      <span>{l.flag}</span>
-                      <span style={{ fontSize: '0.9rem' }}>{l.name}</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-              
-              <div style={{ flex: 1 }}>
-                <label style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '1.25rem', fontWeight: '700', fontSize: '1.1rem' }}>
-                   <Sparkles size={20} color="var(--accent-secondary)" /> 3. They Hear
-                </label>
-                <div style={{ 
-                  display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'repeat(2, 1fr)', gap: '0.75rem',
-                  maxHeight: isMobile ? '200px' : '300px', overflowY: 'auto', paddingRight: '0.5rem'
-                }}>
-                  {LANGUAGES.map(l => (
-                    <div 
-                      key={l.code}
-                      onClick={() => setOutputLang(l.code)}
-                      style={{
-                        padding: '1rem', borderRadius: '14px', cursor: 'pointer',
-                        background: outputLang === l.code ? 'var(--accent-secondary)' : 'rgba(255,255,255,0.03)',
-                        border: '1px solid var(--glass-border)', transition: 'var(--transition)',
-                        display: 'flex', alignItems: 'center', gap: '0.75rem'
-                      }}
-                    >
-                      <span>{l.flag}</span>
-                      <span style={{ fontSize: '0.9rem' }}>{l.name}</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
-
-            <button type="submit" className="btn-primary" style={{ padding: '1.5rem', fontSize: '1.2rem', marginTop: '1rem' }}>
-              Finalize & Join
+            <button type="submit" className="btn-primary" style={{ height: '70px', fontSize: '1.3rem' }}>
+              Join Bridge Session
               <ChevronRight size={24} />
             </button>
           </form>

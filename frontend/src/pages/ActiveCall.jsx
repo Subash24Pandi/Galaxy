@@ -1,73 +1,103 @@
-import Pusher from 'pusher-js';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { useParams, useLocation, useNavigate } from 'react-router-dom';
+import { io } from 'socket.io-client';
+import { ShieldCheck, PhoneOff, Globe, MessageSquare, MicOff, Mic, Activity, Sparkles, ArrowRight } from 'lucide-react';
+
 
 const ActiveCall = () => {
   const { id } = useParams();
   const location = useLocation();
   const navigate = useNavigate();
 
-  const { role, inputLang, outputLang } = location.state || {
-    role: 'agent', inputLang: 'en', outputLang: 'hi'
-  };
-
+  const { role, inputLang } = location.state || { role: 'agent', inputLang: 'ta' };
+  
+  // Zero-Config: We track the target language live from the Peer
+  const [targetLang, setTargetLang] = useState(location.state?.outputLang || 'en');
   const [status, setStatus] = useState('Connecting...');
   const [messages, setMessages] = useState([]);
-  const [isMuted, setIsMuted] = useState(true); // Start muted for safety
+  const [isMuted, setIsMuted] = useState(true);
   const [isSpeaking, setIsSpeaking] = useState(false);
+  const [isReceiverPlaying, setIsReceiverPlaying] = useState(false);
   const [volume, setVolume] = useState(0);
+
+  // For the visual wave
+  useEffect(() => {
+    setIsSpeaking(volume > 0.005);
+  }, [volume]);
   const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
 
-  const pusherRef = useRef(null);
-  const channelRef = useRef(null);
+  const socketRef = useRef(null);
   const audioContextRef = useRef(null);
   const analyserRef = useRef(null);
   const streamRef = useRef(null);
   const pcmDataRef = useRef([]); 
   const isRecordingRef = useRef(false);
+  const recordingStartTimeRef = useRef(null);
+  const isMutedRef = useRef(true); 
   const chatEndRef = useRef(null);
+  const targetLangRef = useRef(targetLang);
+
+  // Keep Ref in sync with state for long-running closures (VAD loop)
+  useEffect(() => {
+    targetLangRef.current = targetLang;
+  }, [targetLang]);
 
   useEffect(() => {
-    const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'https://galaxy-translator.onrender.com';
-    
-    // 1. Initialize Pusher
-    const pusher = new Pusher(import.meta.env.VITE_PUSHER_KEY, {
-      cluster: import.meta.env.VITE_PUSHER_CLUSTER,
+    const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:5000';
+    const socket = io(BACKEND_URL);
+    socketRef.current = socket;
+
+    socket.on('connect', () => {
+      socket.emit('join-session', { sessionId: id, role });
+      // Sync my language immediately on join
+      socket.emit('update_language', { sessionId: id, role, lang: inputLang });
+      setStatus('Online');
     });
-    pusherRef.current = pusher;
 
-    const channel = pusher.subscribe(`session-${id}`);
-    channelRef.current = channel;
+    socket.on('session_status', (data) => setStatus(data.message));
+    socket.on('transcript_update', (data) => setMessages((prev) => [...prev, data]));
+    
+    // Auto-detect Peer's language
+    socket.on('peer_language_updated', ({ lang }) => {
+      console.log(`[Sync] Peer updated language to: ${lang}`);
+      setTargetLang(lang);
+    });
 
-    // 2. Listen for Events
-    channel.bind('session_status', (data) => setStatus(data.message));
-    channel.bind('transcript_update', (data) => setMessages((prev) => [...prev, data]));
-    channel.bind('audio_playback', (data) => {
+    // Initial Handshake Sync for Zero-Config
+    socket.on('initial_sync', ({ agentLang, customerLang }) => {
+      const peerLang = role === 'agent' ? customerLang : agentLang;
+      console.log(`[Sync] Handshake received. Setting Peer Language to: ${peerLang}`);
+      setTargetLang(peerLang);
+    });
+
+    socket.on('audio_playback', async (data) => {
       if (data.targetRole === role && data.audioBase64) {
-        playAudio(data.audioBase64);
+        try {
+          if (!audioContextRef.current) return;
+          if (audioContextRef.current.state === 'suspended') await audioContextRef.current.resume();
+
+          const binaryString = window.atob(data.audioBase64);
+          const len = binaryString.length;
+          const bytes = new Uint8Array(len);
+          for (let i = 0; i < len; i++) bytes[i] = binaryString.charCodeAt(i);
+          
+          const audioBuffer = await audioContextRef.current.decodeAudioData(bytes.buffer);
+          const source = audioContextRef.current.createBufferSource();
+          source.buffer = audioBuffer;
+          source.connect(audioContextRef.current.destination);
+          
+          setIsReceiverPlaying(true);
+          source.onended = () => setIsReceiverPlaying(false);
+          
+          source.start(0);
+        } catch (err) {
+          console.error('[Audio-Playback] Failed to play TTS:', err);
+        }
       }
     });
 
-    // 3. Notify Join via HTTP
-    fetch(`${BACKEND_URL}/api/join`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ sessionId: id, role })
-    }).then(() => setStatus('Ready'));
-
-    const playAudio = (base64) => {
-      try {
-        const audio = new Audio(`data:audio/wav;base64,${base64}`);
-        audio.play().catch(() => {
-          new Audio(`data:audio/wav;base64,${base64}`).play().catch(() => {});
-        });
-      } catch (e) {}
-    };
-
-    return () => {
-      channel.unbind_all();
-      pusher.unsubscribe(`session-${id}`);
-      pusher.disconnect();
-    };
-  }, [id, role]);
+    return () => socket.disconnect();
+  }, [id, role, inputLang]);
 
   const stopAndSend = useCallback(async () => {
     if (isRecordingRef.current) {
@@ -85,9 +115,7 @@ const ActiveCall = () => {
       reader.onloadend = async () => {
         const base64data = reader.result.split(',')[1];
         if (base64data.length > 500) {
-          const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'https://galaxy-translator.onrender.com';
-          
-          // Send via HTTP POST in Serverless mode
+          const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:5000';
           await fetch(`${BACKEND_URL}/api/audio`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -96,43 +124,30 @@ const ActiveCall = () => {
               role, 
               audioBase64: base64data,
               inputLang,
-              outputLang
+              outputLang: targetLangRef.current // Use the Live Ref to avoid stale captures
             })
           });
         }
       };
     }
-  }, [id, role, inputLang, outputLang]);
+  }, [id, role, inputLang, targetLang]);
 
   const startNewRecording = useCallback(() => {
     if (isRecordingRef.current) return;
-    
-    // Kickstart the audio engine in case the browser put it to sleep
-    if (audioContextRef.current && audioContextRef.current.state === 'suspended') {
-      audioContextRef.current.resume();
-    }
-
+    if (audioContextRef.current?.state === 'suspended') audioContextRef.current.resume();
     pcmDataRef.current = [];
     isRecordingRef.current = true;
     setIsSpeaking(true);
   }, []);
 
   const encodeWAV = (samples, sampleRate) => {
-    // 1. Resample to 16kHz if needed
     const inputSampleRate = audioContextRef.current?.sampleRate || 44100;
-    const targetSampleRate = 16000;
-    const resampledData = downsampleBuffer(samples, inputSampleRate, targetSampleRate);
-    
-    // 2. Write WAV
+    const resampledData = downsampleBuffer(samples, inputSampleRate, 16000);
     const buffer = new ArrayBuffer(44 + resampledData.length * 2);
     const view = new DataView(buffer);
-
     const writeString = (offset, string) => {
-      for (let i = 0; i < string.length; i++) {
-        view.setUint8(offset + i, string.charCodeAt(i));
-      }
+      for (let i = 0; i < string.length; i++) view.setUint8(offset + i, string.charCodeAt(i));
     };
-
     writeString(0, 'RIFF');
     view.setUint32(4, 32 + resampledData.length * 2, true);
     writeString(8, 'WAVE');
@@ -140,32 +155,26 @@ const ActiveCall = () => {
     view.setUint32(16, 16, true);
     view.setUint16(20, 1, true);
     view.setUint16(22, 1, true);
-    view.setUint32(24, targetSampleRate, true);
-    view.setUint32(28, targetSampleRate * 2, true);
+    view.setUint32(24, 16000, true);
+    view.setUint32(28, 32000, true);
     view.setUint16(32, 2, true);
     view.setUint16(34, 16, true);
     writeString(36, 'data');
     view.setUint32(40, resampledData.length * 2, true);
-
     let offset = 44;
     for (let i = 0; i < resampledData.length; i++, offset += 2) {
       const s = Math.max(-1, Math.min(1, resampledData[i]));
       view.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
     }
-
     return new Blob([buffer], { type: 'audio/wav' });
   };
 
-  /**
-   * Helper: Professional Downsampler
-   */
   const downsampleBuffer = (buffer, inputSampleRate, targetSampleRate) => {
     if (inputSampleRate === targetSampleRate) return buffer;
     const sampleRateRatio = inputSampleRate / targetSampleRate;
     const newLength = Math.round(buffer.length / sampleRateRatio);
     const result = new Float32Array(newLength);
-    let offsetResult = 0;
-    let offsetBuffer = 0;
+    let offsetResult = 0, offsetBuffer = 0;
     while (offsetResult < result.length) {
       const nextOffsetBuffer = Math.round((offsetResult + 1) * sampleRateRatio);
       let accum = 0, count = 0;
@@ -180,271 +189,185 @@ const ActiveCall = () => {
     return result;
   };
 
+  const isInitializedRef = useRef(false);
+  const rafRef = useRef(null);
+
   useEffect(() => {
     const initVAD = async () => {
+      if (isInitializedRef.current) return;
+      isInitializedRef.current = true;
+
       try {
         const stream = await navigator.mediaDevices.getUserMedia({ 
-          audio: { 
-            echoCancellation: true,
-            noiseSuppression: true,
-            autoGainControl: true,
-            channelCount: 1
-          } 
+          audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } 
         });
         streamRef.current = stream;
 
-        // Use standard hardware sample rate instead of forcing 16kHz
         const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        audioContextRef.current = audioContext;
+
         const analyser = audioContext.createAnalyser();
+        analyser.fftSize = 256;
+        analyserRef.current = analyser;
+
         const source = audioContext.createMediaStreamSource(stream);
-        
-        // Custom Processor for raw PCM capture
         const processor = audioContext.createScriptProcessor(4096, 1, 1);
         
         processor.onaudioprocess = (e) => {
           if (isRecordingRef.current) {
-            const inputData = e.inputBuffer.getChannelData(0);
-            pcmDataRef.current.push(...inputData);
+            pcmDataRef.current.push(...e.inputBuffer.getChannelData(0));
           }
         };
 
-        analyser.fftSize = 256; 
         source.connect(analyser);
         source.connect(processor);
         processor.connect(audioContext.destination);
-        
-        audioContextRef.current = audioContext;
-        analyserRef.current = analyser;
 
-        const bufferLength = analyser.frequencyBinCount;
-        const dataArray = new Uint8Array(bufferLength);
-        
-        // ULTRA SENSITIVE: Catch even quiet whispers
-        const THRESHOLD = 0.001;
-        // Fast response for smooth conversation
-        const SILENCE_DURATION = 1000;
+        const dataArray = new Uint8Array(analyser.frequencyBinCount);
+        const THRESHOLD = 0.0005; // More sensitive for whispered/quiet speech
+        const SILENCE_DURATION = 1200;
         let lastSpeechTime = Date.now();
 
         const checkAudio = () => {
-          if (!analyser || !isRecordingRef.current && isMuted) {
-            setVolume(0);
-            setIsSpeaking(false);
-            requestAnimationFrame(checkAudio);
-            return;
-          }
-
-          analyser.getByteTimeDomainData(dataArray);
+          if (!isInitializedRef.current || !analyserRef.current) return;
           
+          analyserRef.current.getByteTimeDomainData(dataArray);
           let sum = 0;
-          for (let i = 0; i < bufferLength; i++) {
+          for (let i = 0; i < dataArray.length; i++) {
             const amp = (dataArray[i] / 128) - 1;
             sum += amp * amp;
           }
-          const rms = Math.sqrt(sum / bufferLength);
-          
-          // Don't update UI volume if muted
-          if (isMuted) {
+          const rms = Math.sqrt(sum / dataArray.length);
+
+          if (isMutedRef.current) {
             setVolume(0);
             if (isRecordingRef.current) stopAndSend();
           } else {
             setVolume(rms);
             if (rms > THRESHOLD) {
               lastSpeechTime = Date.now();
-              if (!isRecordingRef.current) startNewRecording();
-            } else if (isRecordingRef.current && (Date.now() - lastSpeechTime > SILENCE_DURATION)) {
+              if (!isRecordingRef.current) {
+                startNewRecording();
+                recordingStartTimeRef.current = Date.now();
+              }
+            }
+            
+            const duration = recordingStartTimeRef.current ? (Date.now() - recordingStartTimeRef.current) : 0;
+            if (isRecordingRef.current && (duration > 25000 || Date.now() - lastSpeechTime > SILENCE_DURATION)) {
               stopAndSend();
+              recordingStartTimeRef.current = null;
             }
           }
-          requestAnimationFrame(checkAudio);
+          rafRef.current = requestAnimationFrame(checkAudio);
         };
 
         checkAudio();
       } catch (err) {
-        console.error('Microphone access failed:', err);
-        setStatus('Microphone Error');
+        console.error('VAD Init Failed:', err);
+        setStatus('Mic Error');
       }
     };
 
     initVAD();
-    
+
     return () => {
-      if (streamRef.current) {
-        streamRef.current.getTracks().forEach(t => t.stop());
-      }
-      if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
-        audioContextRef.current.close().catch(e => console.warn('Context close ignored:', e));
-      }
+      isInitializedRef.current = false;
+      if (rafRef.current) cancelAnimationFrame(rafRef.current);
+      if (streamRef.current) streamRef.current.getTracks().forEach(t => t.stop());
+      if (audioContextRef.current?.state !== 'closed') audioContextRef.current?.close();
     };
-  }, []); // Run ONCE on mount
+  }, [startNewRecording, stopAndSend]);
 
-  const leaveCall = () => {
-    if (socket) socket.disconnect();
-    navigate('/');
-  };
-
-  const formatTime = (isoString) => {
-    if (!isoString) return '';
-    const date = new Date(isoString);
-    return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-  };
+  const leaveCall = () => { navigate('/'); };
 
   return (
-    <div className="container" style={{ display: 'flex', flexDirection: 'column', height: '100vh', padding: isMobile ? '0.5rem' : '1.5rem', maxWidth: '1400px' }}>
+    <div className="container" style={{ display: 'flex', flexDirection: 'column', height: '100vh', padding: isMobile ? '1rem' : '1.5rem', maxWidth: '1400px' }}>
       
-      {/* Header */}
-      <div className="glass-panel" style={{ 
-        display: 'flex', justifyContent: 'space-between', alignItems: 'center', 
-        padding: isMobile ? '1rem' : '1.5rem 2.5rem', marginBottom: isMobile ? '0.5rem' : '1.5rem'
-      }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: isMobile ? '0.75rem' : '1.5rem' }}>
-          <div style={{ 
-            width: isMobile ? '40px' : '56px', height: isMobile ? '40px' : '56px', 
-            borderRadius: '12px', background: 'var(--accent-primary)', 
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            boxShadow: '0 8px 32px -4px rgba(99, 102, 241, 0.4)'
-          }}>
-            <ShieldCheck size={isMobile ? 20 : 28} color="white" />
+      {/* Cinematic Header */}
+      <div className="glass-panel" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '1.25rem 2rem', marginBottom: '1.5rem', border: '1px solid rgba(255,255,255,0.05)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '1.5rem' }}>
+          <div className="hover-glow" style={{ width: '50px', height: '50px', borderRadius: '14px', background: 'var(--accent-primary)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <Activity size={24} color="white" />
           </div>
           <div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-              <h2 style={{ fontSize: isMobile ? '0.9rem' : '1.25rem', fontWeight: '700' }}>Session: {id}</h2>
-              <div style={{ 
-                padding: '0.2rem 0.5rem', borderRadius: '6px', fontSize: '0.6rem', fontWeight: '800', 
-                background: 'rgba(255,255,255,0.08)', border: '1px solid var(--glass-border)', color: 'var(--accent-secondary)'
-              }}>{role.toUpperCase()}</div>
-            </div>
-            <div style={{ fontSize: '0.65rem', opacity: 0.6, color: 'var(--accent-secondary)', fontWeight: '700', letterSpacing: '0.05em' }}>
-              • {status.toUpperCase()}
+            <h2 style={{ fontSize: '1.2rem', fontWeight: '700' }}>{id}</h2>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.8rem', fontSize: '0.7rem' }}>
+              <span style={{ color: 'var(--accent-secondary)', fontWeight: '800' }}>● {status.toUpperCase()}</span>
+              {isReceiverPlaying && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', color: 'var(--accent-tertiary)', animation: 'pulse 1s infinite' }}>
+                  <Sparkles size={12} />
+                  <span>HEARING PEER...</span>
+                </div>
+              )}
             </div>
           </div>
         </div>
 
-        <div style={{ display: 'flex', gap: '0.5rem' }}>
-          {!isMobile && (
-            <div className="glass-panel" style={{ padding: '0.75rem 1.25rem', display: 'flex', alignItems: 'center', gap: '0.75rem', borderRadius: '14px' }}>
-               <Globe size={18} color="var(--accent-tertiary)" />
-               <span style={{ fontSize: '0.9rem', fontWeight: '600' }}>{inputLang.toUpperCase()} &rarr; {outputLang.toUpperCase()}</span>
-            </div>
-          )}
-          <button onClick={leaveCall} className="btn-outline" style={{ 
-            background: 'rgba(239, 68, 68, 0.1)', color: '#f87171', border: '1px solid rgba(239, 68, 68, 0.2)', 
-            padding: isMobile ? '0.5rem' : '0.75rem 1.5rem', borderRadius: '12px', width: 'auto'
-          }}>
-            <PhoneOff size={isMobile ? 18 : 20} /> {!isMobile && 'End'}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '1.5rem' }}>
+          <div className="glass-panel" style={{ padding: '0.6rem 1.2rem', borderRadius: '12px', fontSize: '0.85rem', fontWeight: '600', display: 'flex', gap: '0.5rem' }}>
+            <span style={{ color: 'var(--accent-secondary)' }}>YOU: {inputLang.toUpperCase()}</span>
+            <ArrowRight size={14} style={{ opacity: 0.3 }} />
+            <span style={{ color: 'var(--accent-tertiary)' }}>PEER: {targetLang.toUpperCase()}</span>
+          </div>
+          <button onClick={leaveCall} className="btn-secondary" style={{ padding: '0.6rem 1.2rem', color: '#f87171' }}>
+            <PhoneOff size={18} />
           </button>
         </div>
       </div>
 
-      {/* Main Translation Arena */}
-      <div className="glass-panel" style={{ 
-        flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', 
-        gap: isMobile ? '1.25rem' : '2rem', padding: isMobile ? '1.5rem 1rem' : '3rem', 
-        background: 'rgba(15, 23, 42, 0.3)', borderRadius: isMobile ? '20px' : '32px'
-      }}>
+      {/* Arena */}
+      <div className="glass-panel" style={{ flex: 1, overflowY: 'auto', padding: isMobile ? '1.5rem' : '2.5rem', display: 'flex', flexDirection: 'column', gap: '1.5rem', background: 'rgba(2, 6, 23, 0.4)', borderRadius: '32px' }}>
         {messages.length === 0 ? (
-          <div style={{ margin: 'auto', textAlign: 'center', opacity: 0.7, maxWidth: '360px' }}>
-            <MessageSquare size={isMobile ? 32 : 48} color="white" style={{ marginBottom: '1.25rem' }} />
-            <p style={{ fontSize: isMobile ? '1.1rem' : '1.4rem', fontWeight: '700', marginBottom: '1rem' }}>How to Use</p>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', textAlign: 'left' }}>
-              <div className="glass-panel" style={{ padding: '0.75rem 1rem', borderRadius: '12px', display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-                <span style={{ fontSize: '1.4rem' }}>1️⃣</span>
-                <span style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>Make sure the second person has joined the session too.</span>
-              </div>
-              <div className="glass-panel" style={{ padding: '0.75rem 1rem', borderRadius: '12px', display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-                <span style={{ fontSize: '1.4rem' }}>2️⃣</span>
-                <span style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>Allow microphone access when your browser asks.</span>
-              </div>
-              <div className="glass-panel" style={{ padding: '0.75rem 1rem', borderRadius: '12px', display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-                <span style={{ fontSize: '1.4rem' }}>3️⃣</span>
-                <span style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>Just <strong>speak naturally</strong> — pause for 1 second when done. The visualizer below will glow when your mic is active.</span>
-              </div>
-              <div className="glass-panel" style={{ padding: '0.75rem 1rem', borderRadius: '12px', display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-                <span style={{ fontSize: '1.4rem' }}>4️⃣</span>
-                <span style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>Your translated voice will play automatically on the other device.</span>
-              </div>
-            </div>
+          <div style={{ margin: 'auto', textAlign: 'center', maxWidth: '400px', opacity: 0.6 }}>
+            <Sparkles size={48} color="var(--accent-primary)" style={{ marginBottom: '1.5rem' }} />
+            <h3 style={{ fontSize: '1.5rem', marginBottom: '1rem' }}>Bridge Active</h3>
+            <p style={{ fontSize: '0.95rem' }}>Talk naturally. The system will automatically translate and stream your voice to the peer using Zero-Config Pairing.</p>
           </div>
         ) : (
-          messages.map((msg, idx) => {
-            const isMe = msg.role === role;
-            return (
-              <div key={idx} style={{ 
-                alignSelf: isMe ? 'flex-end' : 'flex-start', maxWidth: isMobile ? '90%' : '70%', display: 'flex', 
-                flexDirection: 'column', gap: '0.5rem', animation: 'fadeIn 0.5s ease-out'
+          messages.map((msg, idx) => (
+            <div key={idx} style={{ alignSelf: msg.role === role ? 'flex-end' : 'flex-start', maxWidth: isMobile ? '90%' : '70%', animation: 'fadeIn 0.5s ease-out' }}>
+              <div style={{ 
+                background: msg.role === role ? 'rgba(99, 102, 241, 0.1)' : 'rgba(255,255,255,0.02)',
+                padding: '1.5rem 2rem', borderRadius: '24px', border: '1px solid var(--glass-border)'
               }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', justifyContent: isMe ? 'flex-end' : 'flex-start', padding: '0 0.5rem' }}>
-                  <span style={{ fontSize: '0.7rem', fontWeight: '800', color: isMe ? 'var(--accent-primary)' : 'var(--accent-tertiary)' }}>
-                    {isMe ? 'YOU' : 'OTHER'}
-                  </span>
-                </div>
-                <div style={{ 
-                  background: isMe ? 'rgba(99, 102, 241, 0.2)' : 'rgba(30, 41, 59, 0.8)',
-                  padding: isMobile ? '1rem' : '1.75rem 2rem', 
-                  borderRadius: isMe ? '20px 20px 4px 20px' : '20px 20px 20px 4px',
-                  border: '1px solid var(--glass-border)', backdropFilter: 'blur(10px)'
-                }}>
-                  <div style={{ fontSize: isMobile ? '0.85rem' : '1rem', fontStyle: 'italic', opacity: 0.6, marginBottom: '0.5rem' }}>
-                    "{msg.originalText}"
-                  </div>
-                  <div style={{ fontSize: isMobile ? '1.1rem' : '1.4rem', fontWeight: '600', lineHeight: '1.3' }}>
-                    {msg.translatedText}
-                  </div>
-                </div>
+                <div style={{ fontSize: '0.8rem', opacity: 0.5, fontStyle: 'italic', marginBottom: '0.5rem' }}>"{msg.originalText}"</div>
+                <div style={{ fontSize: '1.1rem', fontWeight: '700' }}>{msg.translatedText}</div>
               </div>
-            );
-          })
+            </div>
+          ))
         )}
         <div ref={chatEndRef} />
       </div>
 
-      {/* Footer */}
-      <div style={{ 
-        display: 'flex', flexDirection: isMobile ? 'column-reverse' : 'row', 
-        alignItems: 'center', justifyContent: 'space-between', 
-        padding: isMobile ? '1rem 0' : '2.5rem 1rem', gap: '1.5rem'
-      }}>
-        
-        <div style={{ width: isMobile ? '100%' : 'auto' }}>
-          <button
-            onClick={() => {
-              // Ensure audio context is resumed on interaction
-              if (audioContextRef.current?.state === 'suspended') audioContextRef.current.resume();
-              setIsMuted(!isMuted);
-            }}
-            style={{
-              padding: '0.85rem 1.5rem', borderRadius: '14px', 
-              background: isMuted ? 'rgba(239, 68, 68, 0.12)' : 'rgba(34, 197, 94, 0.15)',
-              border: `1px solid ${isMuted ? 'rgba(239, 68, 68, 0.2)' : 'rgba(34, 197, 94, 0.3)'}`,
-              color: isMuted ? '#f87171' : '#4ade80', fontWeight: '700', cursor: 'pointer', transition: 'all 0.3s',
-              display: 'flex', alignItems: 'center', gap: '0.75rem', width: isMobile ? '100%' : 'auto', justifyContent: 'center'
-            }}
-          >
-            {isMuted ? <MicOff size={20} /> : <Mic size={20} />}
-            {isMuted ? 'MIC MUTED - CLICK TO START' : 'MIC ACTIVE - SPEAK NOW'}
-          </button>
-        </div>
+      {/* Control Bar */}
+      <div style={{ padding: '2.5rem 0', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '2rem' }}>
+        <button
+          onClick={async () => { 
+            if (audioContextRef.current?.state === 'suspended') await audioContextRef.current.resume();
+            isMutedRef.current = !isMuted; 
+            setIsMuted(!isMuted); 
+          }}
+          className="btn-primary"
+          style={{ 
+            background: isMuted ? 'rgba(244, 63, 94, 0.1)' : 'linear-gradient(135deg, var(--accent-primary), #4f46e5)',
+            color: isMuted ? '#f43f5e' : 'white',
+            border: isMuted ? '1px solid rgba(244, 63, 94, 0.2)' : 'none',
+            flex: isMobile ? 1 : 'none', minWidth: '220px',
+            boxShadow: (!isMuted && volume > 0.01) ? '0 0 20px var(--accent-primary)' : 'none',
+            transition: 'all 0.3s ease'
+          }}
+        >
+          {isMuted ? <MicOff size={20} /> : <Mic size={20} />}
+          {isMuted ? 'Mic is Off' : 'Mic is Live'}
+        </button>
 
-        <div style={{ 
-          display: 'flex', gap: '4px', height: '40px', alignItems: 'center', flex: 1, justifyContent: 'center',
-          opacity: isMuted ? 0.1 : 1, transition: 'opacity 0.5s', width: '100%'
-        }}>
-          {[...Array(isMobile ? 16 : 32)].map((_, i) => (
-            <div key={i} style={{
-              width: isMobile ? '4px' : '6px',
-              background: isSpeaking ? 'var(--accent-primary)' : 'var(--glass-border)',
-              borderRadius: '12px',
-              height: `${6 + (volume * 800 * (0.5 + Math.random()))}px`,
-              maxHeight: '100%',
-              transition: 'height 0.15s ease-out'
-            }} />
+        <div className="wave-container" style={{ flex: 1, justifyContent: 'center', opacity: isMuted ? 0.1 : 1 }}>
+          {[...Array(isMobile ? 12 : 24)].map((_, i) => (
+            <div key={i} className="wave-bar" style={{ height: `${8 + (volume * 600 * (0.4 + Math.random()))}px`, animationPlayState: isSpeaking ? 'running' : 'paused' }} />
           ))}
         </div>
 
-        {!isMobile && (
-          <div className={isSpeaking ? 'pulse-recording' : ''} style={{ flex: 1, display: 'flex', justifyContent: 'flex-end', color: 'var(--text-muted)', fontSize: '0.85rem', fontWeight: '700', letterSpacing: '0.1em' }}>
-             {isSpeaking ? 'RECORDING' : 'IDLE'}
-          </div>
-        )}
+        {!isMobile && <div style={{ flex: 1, textAlign: 'right', fontWeight: '800', color: isSpeaking ? 'var(--accent-secondary)' : 'var(--text-muted)' }}>{isSpeaking ? 'TRANSMITTING' : 'LISTENING'}</div>}
       </div>
     </div>
   );

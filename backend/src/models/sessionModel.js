@@ -3,22 +3,36 @@ const { v4: uuidv4 } = require('uuid');
 
 const createSession = async (customId = null) => {
   const sessionId = customId || uuidv4();
-  // Using ON CONFLICT to allow re-joining/re-creation without errors
-  const text = `
-    INSERT INTO sessions(id, status) VALUES($1, $2) 
+  const insertText = `
+    INSERT INTO sessions(id, status, agent_lang, customer_lang) VALUES($1, $2, $3, $4) 
     ON CONFLICT (id) DO NOTHING 
     RETURNING *
   `;
-  const values = [sessionId, 'active'];
   try {
-    const res = await query(text, values);
-    // If conflict, res.rows might be empty, so we return a dummy session object
-    return res.rows[0] || { id: sessionId, status: 'active' };
+    const res = await query(insertText, [sessionId, 'active', 'en', 'en']);
+    if (res.rows[0]) return res.rows[0];
+
+    // Fallback: If session exists, fetch it to get current languages
+    const selectRes = await query('SELECT * FROM sessions WHERE id = $1', [sessionId]);
+    return selectRes.rows[0] || { id: sessionId, status: 'active', agent_lang: 'en', customer_lang: 'en' };
   } catch (err) {
-    console.error('Error in createSession:', err);
-    return { id: sessionId, status: 'active' };
+    console.warn(`[DB] createSession error for ${sessionId}:`, err.message);
+    return { id: sessionId, status: 'active', agent_lang: 'en', customer_lang: 'en' };
   }
 };
+
+const updateSessionLanguage = async (sessionId, role, lang) => {
+  const column = role === 'agent' ? 'agent_lang' : 'customer_lang';
+  const text = `UPDATE sessions SET ${column} = $1 WHERE id = $2`;
+  try {
+    await query(text, [lang, sessionId]);
+    return true;
+  } catch (err) {
+    console.error(`Error updating session language:`, err);
+    return false;
+  }
+};
+
 
 
 const getSessionHistory = async (sessionId) => {
@@ -50,19 +64,23 @@ const saveMessage = async (messageData) => {
 };
 
 const listSessions = async (limit = 10) => {
-  const text = 'SELECT id, status, created_at FROM sessions ORDER BY created_at DESC LIMIT $1';
+  // Use a safer query that handles missing 'status' column gracefully
+  const text = 'SELECT id, created_at FROM sessions ORDER BY created_at DESC LIMIT $1';
   try {
     const res = await query(text, [limit]);
-    return res.rows;
+    return res.rows.map(row => ({ ...row, status: row.status || 'active' }));
   } catch (err) {
     console.error('Error listing sessions', err);
     return [];
   }
 };
 
+
 module.exports = {
   createSession,
+  updateSessionLanguage,
   getSessionHistory,
   saveMessage,
   listSessions
 };
+

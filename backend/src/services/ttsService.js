@@ -1,45 +1,48 @@
 const synthesizeSpeech = async (text, language) => {
-  const apiKey = process.env.SARVAM_API_KEY;
-  if (!apiKey || apiKey === 'your_sarvam_api_key') {
-    throw new Error('SARVAM_API_KEY is missing');
+  const apiKey = process.env.ELEVENLABS_API_KEY;
+  if (!apiKey) {
+    throw new Error('ELEVENLABS_API_KEY is missing');
   }
 
   if (!text || text.trim() === '') {
     throw new Error('TTS: No text provided');
   }
 
-  // Ensure format is 'xx-IN'
-  const sarvamLang = language.includes('-IN') ? language : `${language}-IN`;
+  const voiceId = 'Xb7hH8MSUJpSbSDYk0k2'; // Alice - Verified active on your account
+  
+  console.log(`[TTS] [ElevenLabs] Synthesizing speech for ${language}...`);
 
-  const response = await fetch('https://api.sarvam.ai/text-to-speech', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'api-subscription-key': apiKey
-    },
-    body: JSON.stringify({
-      inputs: [text.trim()],
-      target_language_code: sarvamLang,
-      speaker: 'arya',
-      model_variant: 'v1',
-      speech_sample_rate: 16000
-    })
-  });
+  try {
+    const response = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'xi-api-key': apiKey
+      },
+      body: JSON.stringify({
+        text: text.trim(),
+        model_id: 'eleven_multilingual_v2',
+        voice_settings: {
+          stability: 0.5,
+          similarity_boost: 0.75
+        }
+      })
+    });
 
-  if (!response.ok) {
-    const errText = await response.text();
-    console.error(`[TTS] Sarvam TTS Error: ${response.status}`, errText);
-    throw new Error(`Sarvam TTS Error: ${response.status} - ${errText}`);
+    if (!response.ok) {
+      const errText = await response.text();
+      console.error(`[TTS] ElevenLabs Error: ${response.status}`, errText);
+      throw new Error(`ElevenLabs Error: ${response.status} - ${errText}`);
+    }
+
+    const buffer = await response.arrayBuffer();
+    const base64 = Buffer.from(buffer).toString('base64');
+
+    return base64;
+  } catch (err) {
+    console.error(`[TTS] Synthesis failure:`, err.message);
+    throw err;
   }
-
-  const data = await response.json();
-  const base64 = data.audios[0]; 
-
-  if (!base64) {
-    throw new Error('Sarvam TTS returned empty audio list');
-  }
-
-  return base64;
 };
 
 module.exports = { synthesizeSpeech };

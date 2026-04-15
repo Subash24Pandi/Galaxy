@@ -28,7 +28,7 @@ const SessionSetup = () => {
     window.addEventListener('resize', handleResize);
     
     // Connect socket for real-time language sync
-    const API_BASE_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:5000';
+    const API_BASE_URL = import.meta.env.VITE_BACKEND_URL || 'https://galaxy-ld7t.onrender.com';
     socketRef.current = io(API_BASE_URL);
     
     socketRef.current.emit('join-session', { sessionId: id, role: 'setup' });

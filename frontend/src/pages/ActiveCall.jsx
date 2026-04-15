@@ -43,7 +43,7 @@ const ActiveCall = () => {
   }, [targetLang]);
 
   useEffect(() => {
-    const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:5000';
+    const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'https://galaxy-ld7t.onrender.com';
     const socket = io(BACKEND_URL);
     socketRef.current = socket;
 

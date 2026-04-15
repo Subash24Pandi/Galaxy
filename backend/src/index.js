@@ -12,13 +12,6 @@ const sessionRoutes = require('./routes/sessionRoutes');
 const { createSession, updateSessionLanguage } = require('./models/sessionModel');
 
 
-const isAllowedOrigin = (origin) => {
-  if (!origin) return true;
-  if (origin.startsWith('http://localhost')) return true;
-  if (origin.endsWith('.vercel.app')) return true;
-  return false;
-};
-
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server, {
@@ -29,26 +22,33 @@ const io = new Server(server, {
   }
 });
 
-// Production Audit Logs
-console.log('--- CLOUD STARTUP AUDIT ---');
-console.log(`[Audit] Port: ${process.env.PORT || 5000}`);
-console.log(`[Audit] DB_URL: ${process.env.DATABASE_URL ? 'OK' : 'MISSING 🔴'}`);
-console.log(`[Audit] Sarvam Key: ${process.env.SARVAM_API_KEY ? 'OK' : 'MISSING 🔴'}`);
-console.log(`[Audit] ElevenLabs Key: ${process.env.ELEVENLABS_API_KEY ? 'OK' : 'MISSING 🔴'}`);
-console.log('---------------------------');
-
-// Provide io instance to controllers via app
-app.set('io', io);
-
-// Payload limit for audio
-app.use(express.json({ limit: '10mb' }));
-app.use(express.urlencoded({ limit: '10mb', extended: true }));
-
+// 1. GLOBAL SECURITY (Must be first)
 app.use(cors({
   origin: (origin, callback) => callback(null, true),
   methods: ['GET', 'POST'],
   credentials: true
 }));
+
+// 2. ROOT HEALTH CHECK (For Cloud Providers)
+app.get('/', (req, res) => {
+  res.status(200).json({ 
+    status: 'Galaxy Bridge API is Online', 
+    timestamp: new Date().toISOString() 
+  });
+});
+
+// 3. PRODUCTION AUDIT LOGS
+console.log('--- CLOUD STARTUP AUDIT (Ver. 1.5) ---');
+console.log(`[Audit] Node Version: ${process.version}`);
+console.log(`[Audit] DB_URL: ${process.env.DATABASE_URL ? 'PRESENT' : 'MISSING 🔴'}`);
+console.log(`[Audit] Sarvam Key: ${process.env.SARVAM_API_KEY ? 'OK' : 'MISSING 🔴'}`);
+console.log(`[Audit] ElevenLabs Key: ${process.env.ELEVENLABS_API_KEY ? 'OK' : 'MISSING 🔴'}`);
+console.log('---------------------------');
+
+// 4. MIDDLEWARE
+app.set('io', io);
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ limit: '10mb', extended: true }));
 
 // Socket.io Connection Logic
 io.on('connection', (socket) => {

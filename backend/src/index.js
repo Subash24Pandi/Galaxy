@@ -23,21 +23,18 @@ const app = express();
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: {
-    origin: (origin, callback) => {
-      if (isAllowedOrigin(origin)) callback(null, true);
-      else callback(new Error('CORS blocked'));
-    },
+    origin: (origin, callback) => callback(null, true),
     methods: ['GET', 'POST'],
     credentials: true
   }
 });
 
-// Production Audit Logs (Masked)
+// Production Audit Logs
 console.log('--- CLOUD STARTUP AUDIT ---');
 console.log(`[Audit] Port: ${process.env.PORT || 5000}`);
-console.log(`[Audit] DB_URL: ${process.env.DATABASE_URL ? 'PRESENT (Masked)' : 'MISSING 🔴'}`);
-console.log(`[Audit] Sarvam Key: ${process.env.SARVAM_API_KEY ? 'OK: ' + process.env.SARVAM_API_KEY.substring(0, 5) + '...' : 'MISSING 🔴'}`);
-console.log(`[Audit] ElevenLabs Key: ${process.env.ELEVENLABS_API_KEY ? 'OK: ' + process.env.ELEVENLABS_API_KEY.substring(0, 5) + '...' : 'MISSING 🔴'}`);
+console.log(`[Audit] DB_URL: ${process.env.DATABASE_URL ? 'OK' : 'MISSING 🔴'}`);
+console.log(`[Audit] Sarvam Key: ${process.env.SARVAM_API_KEY ? 'OK' : 'MISSING 🔴'}`);
+console.log(`[Audit] ElevenLabs Key: ${process.env.ELEVENLABS_API_KEY ? 'OK' : 'MISSING 🔴'}`);
 console.log('---------------------------');
 
 // Provide io instance to controllers via app
@@ -48,10 +45,7 @@ app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ limit: '10mb', extended: true }));
 
 app.use(cors({
-  origin: (origin, callback) => {
-    if (isAllowedOrigin(origin)) callback(null, true);
-    else callback(new Error('CORS blocked'));
-  },
+  origin: (origin, callback) => callback(null, true),
   methods: ['GET', 'POST'],
   credentials: true
 }));

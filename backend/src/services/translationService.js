@@ -32,7 +32,7 @@ const translateText = async (text, sourceLang, targetLang) => {
         input: text.trim(),
         source_language_code: sarvamSource,
         target_language_code: sarvamTarget,
-        mode: 'colloquial',
+        mode: 'modern-colloquial',
         enable_preprocessing: true
       })
     });

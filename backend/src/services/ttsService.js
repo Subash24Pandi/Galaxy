@@ -2,7 +2,13 @@ const synthesizeElevenLabs = async (text, language) => {
   const apiKey = process.env.ELEVENLABS_API_KEY;
   const voiceId = 'Xb7hH8MSUJpSbSDYk0k2'; // Alice - Premium Multilingual
 
-  console.log(`[TTS] [ElevenLabs] Synthesizing speech for ${language}...`);
+  // Use Multilingual v2 for Indian languages (better pronunciation & colloquial quality)
+  // Use Flash v2.5 for English (maximum speed)
+  const lowerLang = (language || 'en').toLowerCase();
+  const isIndianLang = ['ta', 'hi', 'te', 'kn', 'bn', 'gu', 'mr'].some(code => lowerLang.includes(code));
+  const modelId = isIndianLang ? 'eleven_multilingual_v2' : 'eleven_flash_v2_5';
+
+  console.log(`[TTS] [ElevenLabs] model=${modelId} lang=${language}`);
 
   const response = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}?optimize_streaming_latency=4`, {
     method: 'POST',
@@ -12,10 +18,11 @@ const synthesizeElevenLabs = async (text, language) => {
     },
     body: JSON.stringify({
       text: text.trim(),
-      model_id: 'eleven_flash_v2_5',
+      model_id: modelId,
       voice_settings: {
-        stability: 0.3,
-        similarity_boost: 0.5
+        stability: isIndianLang ? 0.55 : 0.3,
+        similarity_boost: isIndianLang ? 0.8 : 0.5,
+        style: isIndianLang ? 0.2 : 0
       }
     })
   });

@@ -20,7 +20,7 @@ const translateText = async (text, sourceLang, targetLang) => {
         body: JSON.stringify({
           model: 'sarvam-30b',
           messages: [
-            { role: 'system', content: `Translate to SPOKEN, COLLOQUIAL ${targetName}. Return ONLY THE TRANSLATION. Do NOT explain. Do NOT give multiple versions. No notes. No labels.` },
+            { role: 'system', content: `Translate to SPOKEN, COLLOQUIAL ${targetName}. Return ONLY THE TRANSLATION in the NATIVE SCRIPT (${targetName} letters). NEVER use English letters for the translation. Do NOT explain. Do NOT give multiple versions. No notes. No labels.` },
             { role: 'user', content: text }
           ],
           temperature: 0.1

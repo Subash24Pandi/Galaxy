@@ -17,15 +17,25 @@ const translateText = async (text, sourceLang, targetLang) => {
         body: JSON.stringify({
           model: 'sarvam-30b',
           messages: [
-            { role: 'system', content: 'Translate to SPOKEN, COLLOQUIAL TAMIL as used in daily casual conversation. Avoid formal literary terms (Thuya Tamil). Be natural.' },
+            { role: 'system', content: 'Translate to SPOKEN, COLLOQUIAL TAMIL/HINDI. Return ONLY THE TRANSLATION. Do NOT explain. Do NOT give multiple versions. No notes. No labels.' },
             { role: 'user', content: text }
           ],
           temperature: 0.1
         })
       });
       const data = await response.json();
-      const content = data.choices?.[0]?.message?.content;
-      return content ? content.trim().replace(/^["']|["']$/g, '') : text;
+      let content = data.choices?.[0]?.message?.content;
+      if (!content) return text;
+
+      // Sanitization: Strip out AI explanations, notes, and parentheticals
+      content = content.trim()
+        .replace(/^["']|["']$/g, '') // Remove outer quotes
+        .replace(/\(.*\)/g, '')      // Remove anything in parentheses
+        .replace(/Note:.*$/gi, '')   // Remove notes
+        .replace(/[A-Z]:\s/g, '')    // Remove labels like A: or B:
+        .trim();
+
+      return content || text;
     } catch (err) {
       console.warn('[Translation] Colloquial fallback failed, using NMT.');
     }

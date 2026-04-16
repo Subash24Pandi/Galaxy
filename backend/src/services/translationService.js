@@ -7,9 +7,12 @@ const translateText = async (text, sourceLang, targetLang) => {
   const sarvamSource = sourceLang.includes('-IN') ? sourceLang : `${sourceLang}-IN`;
   const sarvamTarget = targetLang.includes('-IN') ? targetLang : `${targetLang}-IN`;
 
-  // SPECIAL CASE: For Tamil, use LLM to ensure "Spoken/Colloquial" dialect
-  if (sarvamTarget === 'ta-IN') {
-    console.log(`[Translation] [Colloquial-Tamil] ${sarvamSource} → ${sarvamTarget}: "${text.substring(0, 30)}..."`);
+  const isHindiOrTamil = sarvamTarget === 'ta-IN' || sarvamTarget === 'hi-IN';
+  
+  if (isHindiOrTamil) {
+    const targetName = sarvamTarget === 'ta-IN' ? 'TAMIL' : 'HINDI';
+    console.log(`[Translation] [Colloquial-${targetName}] ${sarvamSource} → ${sarvamTarget}: "${text.substring(0, 30)}..."`);
+    
     try {
       const response = await fetch('https://api.sarvam.ai/v1/chat/completions', {
         method: 'POST',
@@ -17,7 +20,7 @@ const translateText = async (text, sourceLang, targetLang) => {
         body: JSON.stringify({
           model: 'sarvam-30b',
           messages: [
-            { role: 'system', content: 'Translate to SPOKEN, COLLOQUIAL TAMIL/HINDI. Return ONLY THE TRANSLATION. Do NOT explain. Do NOT give multiple versions. No notes. No labels.' },
+            { role: 'system', content: `Translate to SPOKEN, COLLOQUIAL ${targetName}. Return ONLY THE TRANSLATION. Do NOT explain. Do NOT give multiple versions. No notes. No labels.` },
             { role: 'user', content: text }
           ],
           temperature: 0.1

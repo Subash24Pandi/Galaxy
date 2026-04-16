@@ -1,75 +1,153 @@
-const sttService = require('../services/sttService');
+/**
+ * Audio Controller — Real-time STT → Translate → TTS streaming pipeline
+ * 
+ * Architecture:
+ *  1. Receive audio chunk (base64 WAV) from client via HTTP POST
+ *  2. ElevenLabs STT → transcript
+ *  3. Sarvam NMT → translation (colloquial)
+ *  4. ElevenLabs TTS → synthesized audio (base64)
+ *  5. Push transcript + audio to the correct peer via Socket.io
+ * 
+ * The pipeline is STT→Translate→TTS all within one request.
+ * Low latency is achieved by:
+ *   - Fast VAD chunking on the client (1-2s chunks)
+ *   - Immediate parallel STT + translation (where possible)
+ *   - ElevenLabs optimize_streaming_latency=4
+ */
+
+const sttService         = require('../services/sttService');
 const translationService = require('../services/translationService');
-const ttsService = require('../services/ttsService');
+const ttsService         = require('../services/ttsService');
 const { saveMessage, createSession } = require('../models/sessionModel');
 
+/**
+ * Handle a single audio utterance chunk from a speaker.
+ * Emits translated audio + transcript to the session room.
+ */
 const handleAudioUtterance = async (req, res) => {
   const { sessionId, role, audioBase64, inputLang, outputLang } = req.body;
   const io = req.app.get('io');
 
+  // ── Validation ──────────────────────────────────────────────────────────────
   if (!sessionId || !role || !audioBase64) {
-    return res.status(400).json({ success: false, message: 'Invalid payload.' });
+    return res.status(400).json({ 
+      success: false, 
+      message: 'Missing required fields: sessionId, role, audioBase64' 
+    });
+  }
+  if (!inputLang || !outputLang) {
+    return res.status(400).json({ 
+      success: false, 
+      message: 'Missing language config: inputLang, outputLang' 
+    });
   }
 
+  const room       = `session-${sessionId}`;
+  const targetRole = role === 'agent' ? 'customer' : 'agent';
+  const startTime  = Date.now();
+
+  // Respond immediately so client can capture next chunk (non-blocking UX)
+  res.json({ success: true, message: 'Processing audio chunk...' });
+
+  console.log(`\n[Pipeline] ▶ ${role.toUpperCase()} | session=${sessionId} | ${inputLang} → ${outputLang}`);
+
   try {
-    console.log(`[Socket-Pipeline] [${role}] in ${sessionId}: ${inputLang} -> ${outputLang}`);
+    // Ensure session exists
+    await createSession(sessionId).catch(() => {}); // silent if already exists
 
-    // Ensure session exists in DB (Auto-create if joined manually)
-    await createSession(sessionId);
+    // ── STEP 1: STT — ElevenLabs Speech-to-Text ─────────────────────────────
+    const sttStart   = Date.now();
+    const audioBuffer = Buffer.from(audioBase64, 'base64');
+    const originalText = await sttService.transcribeAudio(audioBuffer, inputLang);
+    const sttMs = Date.now() - sttStart;
+    
+    console.log(`[Pipeline] STT ✅ ${sttMs}ms: "${originalText.substring(0, 60)}"`);
 
+    if (!originalText || originalText.trim().length < 1) {
+      console.warn('[Pipeline] STT returned empty — skipping pipeline');
+      io.to(room).emit('session_status', { message: 'Could not understand audio. Try again.' });
+      return;
+    }
 
-    // 1. Transcription (STT)
-    const originalText = await sttService.transcribeAudio(audioBase64, inputLang);
-    if (!originalText) throw new Error('Could not understand audio');
-
-    // 2. Translation
-    const targetRole = role === 'agent' ? 'customer' : 'agent';
-    const translatedText = await translationService.translateText(originalText, inputLang, outputLang);
-
-    // 3. Synthesis (TTS)
-    const ttsAudio = await ttsService.synthesizeSpeech(translatedText, outputLang);
-
-    // 4. Distribute to room via Socket.io
-    const timestamp = new Date().toISOString();
-    const room = `session-${sessionId}`;
-
-    // Emit transcript update
+    // Emit immediate transcript feedback (speaker sees their own text right away)
     io.to(room).emit('transcript_update', {
       role,
+      phase:        'transcribing',
+      originalText,
+      translatedText: null,
+      timestamp:    new Date().toISOString(),
+    });
+
+    // ── STEP 2: Translation — Sarvam AI ─────────────────────────────────────
+    const transStart    = Date.now();
+    const translatedText = await translationService.translateText(originalText, inputLang, outputLang);
+    const transMs = Date.now() - transStart;
+
+    // Safety guard: reject if think tags leaked through or text is abnormally long
+    if (!translatedText || translatedText.toLowerCase().includes('<think>')) {
+      console.error('[Pipeline] Translation contained <think> tags — aborting TTS');
+      io.to(room).emit('session_status', { message: 'Translation error — please try again', type: 'error' });
+      return;
+    }
+    // Trim translation to max 300 chars for TTS safety (spoken utterances are short)
+    const ttsText = translatedText.length > 300
+      ? translatedText.substring(0, 300).replace(/[,.]?$/, '…')
+      : translatedText;
+
+    console.log(`[Pipeline] Translation ✅ ${transMs}ms: "${ttsText.substring(0, 60)}"`);
+
+    // Update transcript with final translation
+    io.to(room).emit('transcript_update', {
+      role,
+      phase:        'translated',
       originalText,
       translatedText,
-      timestamp
+      timestamp:    new Date().toISOString(),
     });
 
-    // Emit audio playback
+    // ── STEP 3: TTS — ElevenLabs Text-to-Speech ─────────────────────────────
+    const ttsStart = Date.now();
+    const ttsAudioBase64 = await ttsService.synthesizeSpeech(ttsText, outputLang);
+    const ttsMs = Date.now() - ttsStart;
+
+    console.log(`[Pipeline] TTS ✅ ${ttsMs}ms | total=${Date.now() - startTime}ms`);
+
+    // ── STEP 4: Push audio to the TARGET peer ───────────────────────────────
     io.to(room).emit('audio_playback', {
-      targetRole,
-      audioBase64: ttsAudio,
-      timestamp
+      targetRole,       // Only the peer (not the speaker) should play this
+      audioBase64: ttsAudioBase64,
+      format:      'mp3',
+      language:    outputLang,
+      translatedText,  // For subtitle overlay on the listener's screen
+      timestamp:   new Date().toISOString(),
     });
 
-    // Persist to Postgres (Async)
+    console.log(`[Pipeline] ✅ Audio pushed to ${targetRole} in room ${room}`);
+
+    // ── STEP 5: Persist to DB (non-blocking) ────────────────────────────────
     saveMessage({
       sessionId,
-      senderRole: role,
+      senderRole:     role,
       originalText,
-      originalLang: inputLang,
+      originalLang:   inputLang,
       translatedText,
       translatedLang: outputLang,
-    }).catch(dbErr => console.warn('[Socket-Pipeline] DB save failed:', dbErr.message));
+    }).catch(dbErr => console.warn('[Pipeline] DB persist failed:', dbErr.message));
 
-    res.json({ success: true, text: originalText });
   } catch (error) {
-    console.error('[Socket-Pipeline] Error:', error.message);
+    const isSilent = error.message.startsWith('SILENT:');
+    const displayMsg = error.message.replace('SILENT:', '').trim();
 
-    // Notify the room of the error
-    io.to(`session-${sessionId}`).emit('session_status', {
-      message: `AI Error: ${error.message}`
-    });
-
-    res.status(500).json({ success: false, message: error.message });
+    if (isSilent) {
+      console.log(`[Pipeline] (Quiet Skip) ${displayMsg}`);
+    } else {
+      console.error(`[Pipeline] ❌ Error: ${error.message}`);
+      io.to(room).emit('session_status', {
+        message: `⚠️ Pipeline error: ${displayMsg.replace('[STT]', '').replace('[TTS]', '').replace('[Translation]', '').trim()}`,
+        type: 'error',
+      });
+    }
   }
 };
 
 module.exports = { handleAudioUtterance };
-

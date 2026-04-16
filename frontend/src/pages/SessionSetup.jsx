@@ -31,7 +31,7 @@ const SessionSetup = () => {
     window.addEventListener('resize', handleResize);
     
     // Connect socket for real-time language sync
-    const API_BASE_URL = import.meta.env.VITE_BACKEND_URL || 'https://galaxy-ld7t.onrender.com';
+    const API_BASE_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:5000';
     socketRef.current = io(API_BASE_URL);
     
     socketRef.current.emit('join-session', { sessionId: id, role: 'setup' });
@@ -80,8 +80,8 @@ const SessionSetup = () => {
             {/* Role Selection */}
             <div style={{ display: 'flex', flexDirection: isMobile ? 'column' : 'row', gap: '1.5rem' }}>
               {[
-                { id: 'agent', label: 'Internal Agent', icon: UserCog },
-                { id: 'customer', label: 'External Customer', icon: User }
+                { id: 'agent',    label: 'Internal Customer', sublabel: 'Company representative', icon: UserCog, color: '#818cf8' },
+                { id: 'customer', label: 'External Customer', sublabel: 'End customer / client',  icon: User,    color: '#34d399' }
               ].map((r) => (
                 <div 
                   key={r.id}
@@ -89,14 +89,15 @@ const SessionSetup = () => {
                   className="glass-panel"
                   style={{ 
                     flex: 1, cursor: 'pointer', padding: '2rem', textAlign: 'center',
-                    background: role === r.id ? 'rgba(99, 102, 241, 0.1)' : 'transparent',
-                    borderColor: role === r.id ? 'var(--accent-primary)' : 'var(--glass-border)',
-                    position: 'relative'
+                    background: role === r.id ? `rgba(${r.id === 'agent' ? '99,102,241' : '52,211,153'},0.08)` : 'rgba(255,255,255,0.01)',
+                    borderColor: role === r.id ? r.color : 'var(--glass-border)',
+                    position: 'relative', transition: 'all 0.2s ease',
                   }}
                 >
-                  {role === r.id && <div style={{ position: 'absolute', top: '1rem', right: '1rem' }}><CheckCircle2 size={20} color="var(--accent-primary)" /></div>}
-                  <r.icon size={48} style={{ marginBottom: '1.5rem', color: role === r.id ? 'var(--accent-primary)' : 'var(--text-muted)' }} />
-                  <div style={{ fontWeight: '700', fontSize: '1.25rem' }}>{r.label}</div>
+                  {role === r.id && <div style={{ position: 'absolute', top: '1rem', right: '1rem' }}><CheckCircle2 size={20} color={r.color} /></div>}
+                  <r.icon size={44} style={{ marginBottom: '1.25rem', color: role === r.id ? r.color : 'var(--text-muted)' }} />
+                  <div style={{ fontWeight: '700', fontSize: '1.15rem', color: role === r.id ? r.color : 'inherit' }}>{r.label}</div>
+                  <div style={{ fontSize: '0.8rem', marginTop: '0.4rem', opacity: 0.5 }}>{r.sublabel}</div>
                 </div>
               ))}
             </div>

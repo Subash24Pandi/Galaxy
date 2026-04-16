@@ -1,77 +1,170 @@
+/**
+ * Translation Service — Sarvam AI ONLY (STRICT: no ElevenLabs, no OpenAI)
+ *
+ * Primary:  Sarvam NMT  /translate  (fast, neural machine translation)
+ * Fallback: Sarvam LLM  /v1/chat/completions  (if NMT fails)
+ *
+ * Mode: modern-colloquial — spoken, casual, NOT formal
+ */
+
 const LANGUAGE_NAMES = {
-  'hi-IN': 'HINDI',
-  'ta-IN': 'TAMIL',
-  'te-IN': 'TELUGU',
-  'kn-IN': 'KANNADA',
-  'bn-IN': 'BENGALI',
-  'gu-IN': 'GUJARATI',
-  'mr-IN': 'MARATHI',
-  'or-IN': 'ODIYA',
-  'as-IN': 'ASSAMESE',
-  'bho-IN': 'BHOJPURI',
-  'en-IN': 'ENGLISH'
+  'en-IN':  'English',
+  'hi-IN':  'Hindi',
+  'ta-IN':  'Tamil',
+  'te-IN':  'Telugu',
+  'kn-IN':  'Kannada',
+  'bn-IN':  'Bengali',
+  'gu-IN':  'Gujarati',
+  'mr-IN':  'Marathi',
+  'or-IN':  'Odiya',
+  'as-IN':  'Assamese',
+  'bho-IN': 'Bhojpuri',
 };
 
+// Normalize language code to Sarvam format (xx-IN)
+const toSarvamCode = (lang) => {
+  if (!lang) return 'en-IN';
+  if (lang.includes('-IN')) return lang;
+  return `${lang}-IN`;
+};
+
+/**
+ * Strip <think>...</think> reasoning blocks from LLM output.
+ * Sarvam-m is a reasoning model — it outputs CoT before the answer.
+ */
+const stripThinkTags = (text) => {
+  if (!text) return text;
+  // Remove full <think>...</think> blocks (including multiline)
+  return text
+    .replace(/<think>[\s\S]*?<\/think>/gi, '')
+    .replace(/<think>[\s\S]*/gi, '')   // unclosed think tag
+    .trim()
+    .replace(/^["""'']|["""'']$/g, '')  // strip surrounding quotes
+    .trim();
+};
+
+/**
+ * Translate text from sourceLang → targetLang using Sarvam AI.
+ * @param {string} text       - Source text (from STT)
+ * @param {string} sourceLang - e.g. 'ta', 'hi-IN'
+ * @param {string} targetLang - e.g. 'en', 'te-IN'
+ * @returns {Promise<string>} - Translated colloquial text
+ */
 const translateText = async (text, sourceLang, targetLang) => {
   const apiKey = process.env.SARVAM_API_KEY;
-  if (!apiKey || apiKey === 'your_sarvam_api_key') throw new Error('SARVAM_API_KEY is missing');
+  if (!apiKey) throw new Error('[Translation] SARVAM_API_KEY missing');
 
-  const sarvamSource = sourceLang.includes('-IN') ? sourceLang : `${sourceLang}-IN`;
-  const sarvamTarget = targetLang.includes('-IN') ? targetLang : `${targetLang}-IN`;
-  const targetName = LANGUAGE_NAMES[sarvamTarget] || sarvamTarget;
+  const trimmed = text?.trim();
+  if (!trimmed) return text;
 
-  console.log(`[Translation] [NMT] ${sarvamSource} → ${sarvamTarget}: "${text.substring(0, 40)}..."`);
+  const src = toSarvamCode(sourceLang);
+  const tgt = toSarvamCode(targetLang);
 
-  // STEP 1: Reliable NMT translation (primary engine — handles all Indian script pairs)
-  let nmtResult = null;
+  // Skip if same language
+  if (src === tgt) {
+    console.log(`[Translation] Same language (${src}) — skipping`);
+    return trimmed;
+  }
+
+  const targetName = LANGUAGE_NAMES[tgt] || tgt;
+  console.log(`[Translation] ${src} → ${tgt}: "${trimmed.substring(0, 50)}..."`);
+
+  // ── STEP 1: Sarvam NMT (Primary — fast neural translation) ──────────────────
   try {
-    const nmtResponse = await fetch('https://api.sarvam.ai/translate', {
+    const nmtCtrl  = new AbortController();
+    const nmtTimer = setTimeout(() => nmtCtrl.abort(), 10000); // 10s cap
+    const nmtRes = await fetch('https://api.sarvam.ai/translate', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'api-subscription-key': apiKey },
+      headers: {
+        'Content-Type': 'application/json',
+        'api-subscription-key': apiKey,
+      },
       body: JSON.stringify({
-        input: text.trim(),
-        source_language_code: sarvamSource,
-        target_language_code: sarvamTarget,
-        mode: 'modern-colloquial',
-        enable_preprocessing: true
-      })
+        input:                trimmed,
+        source_language_code: src,
+        target_language_code: tgt,
+        mode:                 'modern-colloquial',
+        enable_preprocessing: true,
+      }),
+      signal: nmtCtrl.signal,
     });
-    const nmtData = await nmtResponse.json();
-    if (nmtData.translated_text) {
-      nmtResult = nmtData.translated_text.trim().replace(/^["']|["']$/g, '');
-      console.log(`[Translation] [NMT] ✅ Success: "${nmtResult.substring(0, 40)}..."`);
+    clearTimeout(nmtTimer);
+
+    if (nmtRes.ok) {
+      const nmtData = await nmtRes.json();
+      if (nmtData.translated_text) {
+        const result = nmtData.translated_text.trim().replace(/^["""'']|["""'']$/g, '');
+        if (result) {
+          console.log(`[Translation] NMT ✅ "${result.substring(0, 60)}"`);
+          return result;
+        }
+      } else {
+        console.warn('[Translation] NMT returned no translated_text:', JSON.stringify(nmtData).substring(0, 200));
+      }
+    } else {
+      const errBody = await nmtRes.text();
+      console.warn(`[Translation] NMT HTTP ${nmtRes.status}: ${errBody.substring(0, 200)}`);
     }
   } catch (err) {
-    console.warn('[Translation] NMT failed:', err.message);
+    console.warn('[Translation] NMT error:', err.message);
   }
 
-  // If NMT succeeded, return it — it's already colloquial with enable_preprocessing
-  if (nmtResult) return nmtResult;
-
-  // STEP 2: LLM fallback (only if NMT fails completely)
-  console.log(`[Translation] [LLM Fallback] Trying sarvam-30b for ${targetName}...`);
+  // ── STEP 2: Sarvam LLM Fallback (sarvam-m) ──────────────────────────────────
+  // Note: sarvam-m is a reasoning model — MUST strip <think> tags from output
+  console.log(`[Translation] NMT failed → LLM fallback for ${targetName}`);
   try {
-    const llmResponse = await fetch('https://api.sarvam.ai/v1/chat/completions', {
+    const llmCtrl  = new AbortController();
+    const llmTimer = setTimeout(() => llmCtrl.abort(), 20000); // 20s cap
+    const llmRes = await fetch('https://api.sarvam.ai/v1/chat/completions', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'api-subscription-key': apiKey },
+      headers: {
+        'Content-Type': 'application/json',
+        'api-subscription-key': apiKey,
+      },
       body: JSON.stringify({
-        model: 'sarvam-30b',
+        model: 'sarvam-m',
         messages: [
-          { role: 'system', content: `You are a translator. Translate the following text to spoken, colloquial ${targetName}. Return ONLY the translation in native ${targetName} script. No explanations.` },
-          { role: 'user', content: text }
+          {
+            role: 'system',
+            content: `You are a professional spoken-word interpreter for ${targetName}.
+- Handle "Noisy" transcriptions: If the input has clear typos from voice-to-text, fix them before translating.
+- Style: Use very natural, casual, colloquial ${targetName} as spoken by a native.
+- Output: Return ONLY the translation in native ${targetName} script. No explanations or extra text.`,
+          },
+          {
+            role: 'user',
+            content: trimmed,
+          },
         ],
-        temperature: 0.1
-      })
+        temperature: 0.1,
+        max_tokens:  300,
+      }),
+      signal: llmCtrl.signal,
     });
-    const llmData = await llmResponse.json();
-    const content = llmData.choices?.[0]?.message?.content?.trim();
-    if (content) return content.replace(/^["']|["']$/g, '').trim();
+    clearTimeout(llmTimer);
+
+    if (llmRes.ok) {
+      const llmData = await llmRes.json();
+      const raw = llmData.choices?.[0]?.message?.content;
+      if (raw) {
+        // CRITICAL: strip <think>...</think> reasoning blocks before using
+        const cleaned = stripThinkTags(raw);
+        if (cleaned) {
+          console.log(`[Translation] LLM ✅ "${cleaned.substring(0, 60)}"`);
+          return cleaned;
+        }
+      }
+    } else {
+      const errBody = await llmRes.text();
+      console.warn(`[Translation] LLM HTTP ${llmRes.status}: ${errBody.substring(0, 200)}`);
+    }
   } catch (err) {
-    console.warn('[Translation] LLM fallback also failed:', err.message);
+    console.warn('[Translation] LLM error:', err.message);
   }
 
-  // Final fallback: return original text
-  return text;
+  // ── Last resort: return original ────────────────────────────────────────────
+  console.error('[Translation] All engines failed — returning original');
+  return trimmed;
 };
 
 module.exports = { translateText };

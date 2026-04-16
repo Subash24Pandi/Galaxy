@@ -1,172 +1,195 @@
 require('dotenv').config();
 const express = require('express');
-const http = require('http');
+const http    = require('http');
 const { Server } = require('socket.io');
-const cors = require('cors');
-const fs = require('fs');
-const path = require('path');
+const cors   = require('cors');
 const { connectDB, query } = require('./config/db');
 
-const { handleAudioUtterance } = require('./controllers/audioController');
-const sessionRoutes = require('./routes/sessionRoutes');
+const { handleAudioUtterance }          = require('./controllers/audioController');
+const sessionRoutes                      = require('./routes/sessionRoutes');
 const { createSession, updateSessionLanguage } = require('./models/sessionModel');
 
-
-const app = express();
+const app    = express();
 const server = http.createServer(app);
-const io = new Server(server, {
-  cors: {
-    origin: (origin, callback) => callback(null, true),
-    methods: ['GET', 'POST'],
-    credentials: true
-  }
+const io     = new Server(server, {
+  cors: { origin: '*', methods: ['GET', 'POST'] }
 });
 
-// 1. GLOBAL SECURITY (Must be first)
-app.use(cors({
-  origin: (origin, callback) => callback(null, true),
-  methods: ['GET', 'POST'],
-  credentials: true
-}));
+// ── CORS ──────────────────────────────────────────────────────────────────────
+app.use(cors({ origin: '*', methods: ['GET', 'POST'] }));
 
-// 2. ROOT HEALTH CHECK (For Cloud Providers)
-app.get('/', (req, res) => {
-  res.status(200).json({ 
-    status: 'Galaxy Bridge API is Online', 
-    timestamp: new Date().toISOString() 
-  });
-});
+// ── Startup Audit ─────────────────────────────────────────────────────────────
+console.log('═══════════════════════════════════════════════════════');
+console.log('  GALAXY BRIDGE  —  Real-time Bilingual Voice Translator');
+console.log('  Pipeline: ElevenLabs STT → Sarvam NMT → ElevenLabs TTS');
+console.log('═══════════════════════════════════════════════════════');
+console.log(`[Audit] Node        : ${process.version}`);
+console.log(`[Audit] DATABASE_URL: ${process.env.DATABASE_URL   ? '✅ PRESENT' : '❌ MISSING'}`);
+console.log(`[Audit] SARVAM_KEY  : ${process.env.SARVAM_API_KEY ? '✅ OK'      : '❌ MISSING'}`);
+console.log(`[Audit] ELEVENLABS  : ${process.env.ELEVENLABS_API_KEY ? '✅ OK'  : '❌ MISSING'}`);
+console.log('═══════════════════════════════════════════════════════');
 
-// 3. PRODUCTION AUDIT LOGS
-console.log('--- CLOUD STARTUP AUDIT (Ver. 1.5) ---');
-console.log(`[Audit] Node Version: ${process.version}`);
-console.log(`[Audit] DB_URL: ${process.env.DATABASE_URL ? 'PRESENT' : 'MISSING 🔴'}`);
-console.log(`[Audit] Sarvam Key: ${process.env.SARVAM_API_KEY ? 'OK' : 'MISSING 🔴'}`);
-console.log(`[Audit] ElevenLabs Key: ${process.env.ELEVENLABS_API_KEY ? 'OK' : 'MISSING 🔴'}`);
-console.log('---------------------------');
-
-// 4. MIDDLEWARE
+// ── Middleware ────────────────────────────────────────────────────────────────
 app.set('io', io);
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ limit: '10mb', extended: true }));
 
-// Socket.io Connection Logic
+// ── Health check ──────────────────────────────────────────────────────────────
+app.get('/', (req, res) => res.json({ status: 'Galaxy Bridge Online', ts: new Date().toISOString() }));
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+//  IN-MEMORY LANGUAGE STORE  (PRIMARY source of truth — 100% DB-independent)
+//
+//  Structure:  sessionLangs.get(sessionId) = { agent: 'ta', customer: 'en' }
+//  This fixes the peer-language-auto-change bug caused by DB being offline.
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+const sessionLangs = new Map();
+
+function getLangs(sessionId) {
+  if (!sessionLangs.has(sessionId)) {
+    sessionLangs.set(sessionId, { agent: null, customer: null });
+  }
+  return sessionLangs.get(sessionId);
+}
+
+function setLang(sessionId, role, lang) {
+  const s = getLangs(sessionId);
+  if (role === 'agent')    s.agent    = lang;
+  if (role === 'customer') s.customer = lang;
+  console.log(`[LangStore] ${sessionId} → agent="${s.agent}" | customer="${s.customer}"`);
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+//  SOCKET.IO  —  Real-time language sync + session management
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 io.on('connection', (socket) => {
-  console.log('Client connected:', socket.id);
+  console.log(`[Socket] ✅ Connected: ${socket.id}`);
 
-  socket.on('join-session', async ({ sessionId, role }) => {
+  // ── join-session ─────────────────────────────────────────────────────────
+  socket.on('join-session', ({ sessionId, role }) => {
     socket.join(`session-${sessionId}`);
-    console.log(`${role} joined session: ${sessionId}`);
-    
-    // Auto-create or fetch session data (Now robustly returns current state)
-    const sessionData = await createSession(sessionId);
+    socket.data.sessionId = sessionId;
+    socket.data.role      = role;
+    console.log(`[Socket] ${role.toUpperCase()} joined session ${sessionId}`);
 
-    // Initial sync of languages for the newcomer
-    socket.emit('initial_sync', {
-      agentLang: sessionData.agent_lang,
-      customerLang: sessionData.customer_lang
+    // Create session in DB (fire-and-forget — doesn't block language sync)
+    createSession(sessionId).catch(() => {});
+
+    // ── Announce join ───────────────────────────────────────────────────
+    const label    = role === 'agent' ? '🏢 Internal Customer' : '👤 External Customer';
+    const room     = `session-${sessionId}`;
+    const roomSize = io.sockets.adapter.rooms.get(room)?.size || 1;
+
+    io.to(room).emit('session_status', {
+      message: `${label} joined the bridge`,
+      type: 'info',
     });
 
-    // Notify room
-    io.to(`session-${sessionId}`).emit('session_status', { 
-      message: `${role.toUpperCase()} has joined the session` 
-    });
+    if (roomSize >= 2) {
+      io.to(room).emit('session_status', {
+        message: '● Both participants connected — Bridge is live',
+        type: 'success',
+      });
+    }
+
+    // ── Delay initial_sync by 150ms ────────────────────────────────────
+    // Client emits join-session then update_language immediately after.
+    // Waiting lets update_language arrive and update in-memory store FIRST,
+    // so initial_sync contains the correct language, not stale old values.
+    setTimeout(() => {
+      const langs = getLangs(sessionId);
+      socket.emit('initial_sync', {
+        agentLang:    langs.agent,
+        customerLang: langs.customer,
+      });
+      console.log(`[LangSync] initial_sync → agent="${langs.agent}" customer="${langs.customer}"`);
+
+      // Tell existing peers in room what MY language is (if already set)
+      const myLang = role === 'agent' ? langs.agent : langs.customer;
+      if (myLang) {
+        socket.to(room).emit('peer_language_updated', { peerRole: role, lang: myLang });
+      }
+    }, 150);
   });
 
-  socket.on('update_language', async ({ sessionId, role, lang }) => {
-    console.log(`[Socket-Pipeline] [${role}] in ${sessionId}: Language updated to: ${lang}`);
-    await updateSessionLanguage(sessionId, role, lang);
+  // ── update_language ───────────────────────────────────────────────────────
+  // Called when a user selects/changes their language in setup or active call
+  socket.on('update_language', ({ sessionId, role, lang }) => {
+    if (!sessionId || !role || !lang) return;
+    console.log(`[LangSync] ${role.toUpperCase()} set lang="${lang}" in session ${sessionId}`);
+
+    // 1. Update in-memory store immediately
+    setLang(sessionId, role, lang);
+
+    // 2. Persist to DB (best-effort, non-blocking)
+    updateSessionLanguage(sessionId, role, lang).catch(() => {});
+
+    // 3. Tell all PEERS in the room (NOT the sender) what our language is
     socket.to(`session-${sessionId}`).emit('peer_language_updated', {
       peerRole: role,
-      lang: lang
+      lang,
     });
   });
 
-
-  socket.on('disconnect', () => {
-    console.log('Client disconnected:', socket.id);
+  // ── disconnect ────────────────────────────────────────────────────────────
+  socket.on('disconnect', (reason) => {
+    const { sessionId, role } = socket.data || {};
+    console.log(`[Socket] ❌ ${socket.id} disconnected (${reason})`);
+    if (sessionId && role && role !== 'setup') {
+      const label = role === 'agent' ? '🏢 Internal Customer' : '👤 External Customer';
+      io.to(`session-${sessionId}`).emit('session_status', {
+        message: `${label} left the bridge`,
+        type: 'info',
+      });
+    }
   });
 });
 
-// Routes
+// ── REST Routes ───────────────────────────────────────────────────────────────
 app.use('/api/sessions', sessionRoutes);
-
-// Real-time Endpoints
 app.post('/api/audio', handleAudioUtterance);
 
-app.post('/api/join', (req, res) => {
-  const { sessionId, role } = req.body;
-  // Fallback for HTTP-based join if needed, but sockets handle it now
-  io.to(`session-${sessionId}`).emit('session_status', { 
-    message: `${role.toUpperCase()} has joined the session` 
-  });
-  res.json({ success: true });
-});
-
-// Health Check
 app.get('/api/health', async (req, res) => {
-  const health = { database: 'down', pipeline: 'down' };
+  const health = { database: 'down', pipeline: 'down', memory: 'up' };
   try {
     await query('SELECT 1');
     health.database = 'up';
   } catch (e) {
-    console.warn('[Health] DB Check Failed:', e.message);
+    console.warn('[Health] DB check failed:', e.message);
   }
-
-  if (process.env.SARVAM_API_KEY && process.env.SARVAM_API_KEY !== 'your_sarvam_api_key') {
+  if (process.env.SARVAM_API_KEY && process.env.ELEVENLABS_API_KEY) {
     health.pipeline = 'up';
   }
-
   res.json(health);
 });
 
+// ── DB Init ───────────────────────────────────────────────────────────────────
 const startDatabase = async () => {
   try {
-    console.log('[Galaxy] Connecting to Database...');
+    console.log('[DB] Connecting...');
     await connectDB();
-    
-    // Deep Harmonization: Ensure columns match the new schema regardless of local state
-    await query(`
-      DO $$ 
-      BEGIN 
-        -- 1. Harmonize sessions table
-        IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='sessions' AND column_name='session_id') THEN
-          BEGIN
-            ALTER TABLE sessions RENAME COLUMN session_id TO id;
-          EXCEPTION WHEN others THEN
-            ALTER TABLE sessions ALTER COLUMN session_id DROP NOT NULL;
-          END;
-        END IF;
 
-        -- 2. Add Lang Columns
+    await query(`
+      DO $$
+      BEGIN
         IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='sessions' AND column_name='agent_lang') THEN
-          ALTER TABLE sessions ADD COLUMN agent_lang VARCHAR(10) DEFAULT 'ta';
+          ALTER TABLE sessions ADD COLUMN agent_lang VARCHAR(10) DEFAULT 'en';
         END IF;
         IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='sessions' AND column_name='customer_lang') THEN
           ALTER TABLE sessions ADD COLUMN customer_lang VARCHAR(10) DEFAULT 'en';
         END IF;
-
-        -- 3. Fix Constraints
-        ALTER TABLE messages DROP CONSTRAINT IF EXISTS messages_session_id_fkey;
-        ALTER TABLE sessions ALTER COLUMN id TYPE VARCHAR(100);
-        ALTER TABLE messages ALTER COLUMN session_id TYPE VARCHAR(100);
-        
-        IF NOT EXISTS (SELECT 1 FROM information_schema.table_constraints WHERE constraint_name='messages_session_id_fkey') THEN
-          ALTER TABLE messages ADD CONSTRAINT messages_session_id_fkey FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE;
-        END IF;
       END $$;
-    `).catch(e => console.warn('[Migration] Deep Harmonization Handled:', e.message));
-    console.log('[Galaxy] Database Connected & Harmonized.');
-  } catch (error) {
-    console.error('[Galaxy] Database Connection Failed:', error.message);
+    `).catch(e => console.warn('[DB] Migration skipped:', e.message));
+
+    console.log('[DB] ✅ Ready');
+  } catch (err) {
+    console.warn('[DB] ⚠ Unavailable — running in memory-only mode (translation still works)');
   }
 };
 
-// Start the server immediately to avoid Render 502/CORS issues
+// ── Start Server ──────────────────────────────────────────────────────────────
 const PORT = process.env.PORT || 5000;
 server.listen(PORT, () => {
-  console.log(`[Galaxy] Server listening on port ${PORT}`);
-  // Start the database connection in the background
+  console.log(`[Galaxy] 🚀 Server on port ${PORT}`);
   startDatabase();
 });
-

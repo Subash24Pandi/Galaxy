@@ -11,7 +11,10 @@ const LANGUAGES = [
   { code: 'kn', name: 'Kannada', flag: '🇮🇳' },
   { code: 'bn', name: 'Bengali', flag: '🇮🇳' },
   { code: 'gu', name: 'Gujarati', flag: '🇮🇳' },
-  { code: 'mr', name: 'Marathi', flag: '🇮🇳' }
+  { code: 'mr', name: 'Marathi', flag: '🇮🇳' },
+  { code: 'or', name: 'Odiya', flag: '🇮🇳' },
+  { code: 'as', name: 'Assamese', flag: '🇮🇳' },
+  { code: 'bho', name: 'Bhojpuri', flag: '🇮🇳' }
 ];
 
 const SessionSetup = () => {

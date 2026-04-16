@@ -7,7 +7,7 @@ const synthesizeSpeech = async (text, language) => {
   console.log(`[TTS] [ElevenLabs] Synthesizing speech for ${language}...`);
 
   try {
-    const response = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`, {
+    const response = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}?optimize_streaming_latency=4`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -17,8 +17,8 @@ const synthesizeSpeech = async (text, language) => {
         text: text.trim(),
         model_id: 'eleven_flash_v2_5',
         voice_settings: {
-          stability: 0.5,
-          similarity_boost: 0.75
+          stability: 0.3,
+          similarity_boost: 0.5
         }
       })
     });

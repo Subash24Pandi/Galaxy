@@ -147,7 +147,7 @@ io.on('connection', (socket) => {
 
 // ── REST Routes ───────────────────────────────────────────────────────────────
 app.use('/api/sessions', sessionRoutes);
-app.post('/api/audio', handleAudioUtterance);
+app.post('/api/audio/process', handleAudioUtterance);
 
 app.get('/api/health', async (req, res) => {
   const health = { database: 'down', pipeline: 'down', memory: 'up' };

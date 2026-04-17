@@ -1,41 +1,43 @@
 /**
- * STT Service — ElevenLabs Speech-to-Text ONLY
- * Uses axios + form-data (compatible in Node 18+)
- * Native fetch + form-data npm package are INCOMPATIBLE — causes 400 "error parsing the body"
+ * STT Service — Sarvam AI Saaras:v1
+ * 
+ * Specifically optimized for Indian languages and accents.
+ * Automatically handles multilingual speech and regional dialects.
  */
 
 const axios    = require('axios');
 const FormData = require('form-data');
 
-// ElevenLabs language code mapping (BCP-47)
+// Sarvam supported languages
 const LANG_MAP = {
-  'en': 'en', 'en-IN': 'en',
-  'hi': 'hi', 'hi-IN': 'hi',
-  'ta': 'ta', 'ta-IN': 'ta',
-  'te': 'te', 'te-IN': 'te',
-  'kn': 'kn', 'kn-IN': 'kn',
-  'bn': 'bn', 'bn-IN': 'bn',
-  'gu': 'gu', 'gu-IN': 'gu',
-  'mr': 'mr', 'mr-IN': 'mr',
-  'or': 'or', 'or-IN': 'or',
-  'as': 'as', 'as-IN': 'as',
-  'bho': 'hi', 'bho-IN': 'hi',   // Bhojpuri → Hindi fallback
+  'en': 'en-IN', 'en-IN': 'en-IN',
+  'hi': 'hi-IN', 'hi-IN': 'hi-IN',
+  'ta': 'ta-IN', 'ta-IN': 'ta-IN',
+  'te': 'te-IN', 'te-IN': 'te-IN',
+  'kn': 'kn-IN', 'kn-IN': 'kn-IN',
+  'bn': 'bn-IN', 'bn-IN': 'bn-IN',
+  'gu': 'gu-IN', 'gu-IN': 'gu-IN',
+  'mr': 'mr-IN', 'mr-IN': 'mr-IN',
+  'ml': 'ml-IN', 'ml-IN': 'ml-IN',
+  'or': 'or-IN', 'or-IN': 'or-IN',
+  'as': 'as-IN', 'as-IN': 'as-IN',
+  'bho': 'hi-IN', // Fallback Bhojpuri to Hindi (Saaras understands it via Hindi)
 };
 
 /**
- * Transcribe audio using ElevenLabs scribe_v1
+ * Transcribe audio using Sarvam Saaras:v1
  * @param {Buffer|string} audioInput - Raw Buffer OR base64 string
  * @param {string} language          - Language code e.g. 'ta', 'hi-IN'
  * @returns {Promise<string>}        - Transcript text
  */
 const transcribeAudio = async (audioInput, language) => {
-  const apiKey = process.env.ELEVENLABS_API_KEY;
-  if (!apiKey) throw new Error('[STT] ELEVENLABS_API_KEY missing');
+  const apiKey = process.env.SARVAM_API_KEY;
+  if (!apiKey) throw new Error('[STT] SARVAM_API_KEY missing');
 
-  // Resolve language code
+  // Normalize language code
   const langBase = (language || 'en').toLowerCase().split('-')[0];
   const langFull  = (language || 'en').toLowerCase();
-  const langCode  = LANG_MAP[langFull] || LANG_MAP[langBase] || 'en';
+  const langCode  = LANG_MAP[langFull] || LANG_MAP[langBase] || 'hi-IN';
 
   // Normalize to Buffer
   const audioBuffer = Buffer.isBuffer(audioInput)
@@ -46,52 +48,35 @@ const transcribeAudio = async (audioInput, language) => {
     throw new Error('[STT] Audio too short — likely silence');
   }
 
-  // Build multipart form using form-data npm package + axios (compatible pair)
+  // Build multipart form
   const form = new FormData();
   form.append('file', audioBuffer, {
     filename:    'audio.wav',
     contentType: 'audio/wav',
     knownLength: audioBuffer.length,
   });
-  form.append('model_id', 'scribe_v1');
-  if (langCode) {
-    form.append('language_code', langCode);
-  }
-  // Disable audio event tags — prevents (MUSIC), (Machine sound) etc. in transcript
-  form.append('tag_audio_events', 'false');
-  form.append('diarize',          'false');
+  form.append('model', 'saaras:v1');
+  // Optional: form.append('language_code', langCode); // Saaras often auto-detects better without this, but we'll include it for stability
 
-  console.log(`[STT] Transcribing ${audioBuffer.length}B | lang=${langCode}`);
+  console.log(`[STT] Sarvam | ${audioBuffer.length}B | expected_lang=${langCode}`);
 
   try {
     const response = await axios.post(
-      'https://api.elevenlabs.io/v1/speech-to-text',
+      'https://api.sarvam.ai/speech-to-text',
       form,
       {
         headers: {
-          'xi-api-key': apiKey,
-          ...form.getHeaders(),   // sets Content-Type: multipart/form-data; boundary=...
+          'api-subscription-key': apiKey,
+          ...form.getHeaders(),
         },
-        maxBodyLength: Infinity,
-        maxContentLength: Infinity,
-        timeout: 30000,   // 30s — ElevenLabs STT can be slow on first request
+        timeout: 20000, // 20s
       }
     );
 
-    const raw = response.data?.text?.trim();
-    if (!raw) throw new Error('SILENT:Empty transcript');
+    const transcript = response.data?.transcript?.trim();
+    if (!transcript) throw new Error('SILENT:Empty transcript');
 
-    // Filter out ElevenLabs audio-event noise tags like (MUSIC), (Machine sound), etc.
-    const transcript = raw
-      .replace(/\(.*?\)/g, '')   // remove (anything in parens)
-      .replace(/\[.*?\]/g, '')   // remove [anything in brackets]
-      .replace(/\*.*?\*/g, '')   // remove *anything in asterisks*
-      .trim();
-
-    if (!transcript) throw new Error('SILENT:Only noise detected');
-
-    // Reject suspiciously long transcripts (now 500+ chars for a full sentence)
-    // which usually means TV/Movie sound is leaking through.
+    // Reject background noise/media leaks
     if (transcript.length > 500) {
       console.warn(`[STT] ⚠ Sequence too long (${transcript.length}) — stripping as noise`);
       throw new Error('SILENT:Background media detected');
@@ -103,7 +88,7 @@ const transcribeAudio = async (audioInput, language) => {
   } catch (err) {
     if (err.response) {
       const detail = JSON.stringify(err.response.data);
-      throw new Error(`[STT] ElevenLabs ${err.response.status}: ${detail}`);
+      throw new Error(`[STT] Sarvam ${err.response.status}: ${detail}`);
     }
     throw new Error(`[STT] ${err.message}`);
   }

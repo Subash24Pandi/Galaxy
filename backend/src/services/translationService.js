@@ -16,6 +16,7 @@ const LANGUAGE_NAMES = {
   'bn-IN':  'Bengali',
   'gu-IN':  'Gujarati',
   'mr-IN':  'Marathi',
+  'ml-IN':  'Malayalam',
   'or-IN':  'Odiya',
   'as-IN':  'Assamese',
   'bho-IN': 'Bhojpuri',

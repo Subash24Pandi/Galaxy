@@ -34,11 +34,12 @@ const MIN_AUDIO_BYTES  = 15000;   // Reject background noise and short hums
 const STREAM_INTERVAL_MS = 999999; // End-of-sentence mode
 
 const LANG_LABELS = {
-  en: 'English', 'en-IN': 'English (IN)',
+  en: 'English', 'en-IN': 'English',
   hi: 'Hindi',   'hi-IN': 'Hindi',
   ta: 'Tamil',   'ta-IN': 'Tamil',
   te: 'Telugu',  'te-IN': 'Telugu',
   kn: 'Kannada', 'kn-IN': 'Kannada',
+  ml: 'Malayalam','ml-IN': 'Malayalam',
   bn: 'Bengali', 'bn-IN': 'Bengali',
   gu: 'Gujarati','gu-IN': 'Gujarati',
   mr: 'Marathi', 'mr-IN': 'Marathi',

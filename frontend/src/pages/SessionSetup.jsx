@@ -9,6 +9,7 @@ const LANGUAGES = [
   { code: 'ta', name: 'Tamil', flag: '🇮🇳' },
   { code: 'te', name: 'Telugu', flag: '🇮🇳' },
   { code: 'kn', name: 'Kannada', flag: '🇮🇳' },
+  { code: 'ml', name: 'Malayalam', flag: '🇮🇳' },
   { code: 'bn', name: 'Bengali', flag: '🇮🇳' },
   { code: 'gu', name: 'Gujarati', flag: '🇮🇳' },
   { code: 'mr', name: 'Marathi', flag: '🇮🇳' },

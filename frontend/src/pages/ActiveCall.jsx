@@ -278,23 +278,21 @@ const ActiveCall = () => {
       if (!base64) return;
 
       pipelineQueueRef.current += 1;
-    const formData = new FormData();
-    formData.append('audio', wavBlob, 'audio.wav');
-
     try {
       pipelineQueueRef.current++;
       setIsPipelineActive(true);
       console.log(`[Pipeline] Sending sentence: ${wavBlob.size}B | ${inputLang} → ${targetLangRef.current}`);
 
       const res = await fetch(`${API_BASE}/api/audio/process`, {
-        method: 'POST',
-        headers: {
-          'x-session-id': id,
-          'x-role':       role,
-          'x-input-lang': inputLang,
-          'x-target-lang': targetLangRef.current,
-        },
-        body: formData,
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sessionId:   id,
+          role:        role,
+          audioBase64: base64,
+          inputLang:   inputLang,
+          outputLang:  targetLangRef.current,
+        }),
       });
 
       if (!res.ok) {

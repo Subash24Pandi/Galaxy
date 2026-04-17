@@ -27,7 +27,7 @@ import {
 const SOCKET_URL  = import.meta.env.VITE_BACKEND_URL || 'http://localhost:5000';
 const API_BASE    = import.meta.env.VITE_BACKEND_URL || ''; 
 const SAMPLE_RATE = 16000;       // Hz — optimal for STT
-const SILENCE_MS       = 800;     // Better balance: waits for natural pauses but sends fast
+const SILENCE_MS       = 500;     // 0.5s pause triggers translation — fast but natural
 const MAX_CHUNK_MS     = 15000;   // Sentence cap
 const VAD_THRESHOLD    = 0.05;    // Aggressive fan/AC filter
 const MIN_AUDIO_BYTES  = 15000;   // Reject background noise and short hums

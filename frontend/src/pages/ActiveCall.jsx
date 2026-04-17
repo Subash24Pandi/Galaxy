@@ -466,7 +466,20 @@ const ActiveCall = () => {
     const newMuted = !isMuted;
     isMutedRef.current = newMuted;
     setIsMuted(newMuted);
-  }, [isMuted]);
+
+    // ── FLUSH on mute: send any pending audio immediately ─────────────────────
+    // This ensures the last sentence is not dropped when user presses Mic Off
+    if (newMuted && isRecordingRef.current) {
+      isRecordingRef.current    = false;
+      recordingStartRef.current = null;
+      const buf = [...pcmDataRef.current];
+      pcmDataRef.current = [];
+      if (buf.length > 0) {
+        console.log(`[VAD] 🔴 Mic Off — flushing ${buf.length} samples`);
+        sendChunk(buf);
+      }
+    }
+  }, [isMuted, sendChunk]);
 
   const leaveCall = () => navigate('/');
 

@@ -29,8 +29,8 @@ const API_BASE    = import.meta.env.VITE_BACKEND_URL || '';
 const SAMPLE_RATE = 16000;       // Hz — optimal for STT
 const SILENCE_MS       = 400;     // Fast detection - 0.4s silence triggers translation
 const MAX_CHUNK_MS     = 15000;   // Sentence cap
-const VAD_THRESHOLD    = 0.025;   // Balanced filter
-const MIN_AUDIO_BYTES  = 8000;    // Process even short 'yes/no' answers fast
+const VAD_THRESHOLD    = 0.05;    // Aggressive fan/AC filter
+const MIN_AUDIO_BYTES  = 15000;   // Reject background noise and short hums
 const STREAM_INTERVAL_MS = 999999; // End-of-sentence mode
 
 const LANG_LABELS = {

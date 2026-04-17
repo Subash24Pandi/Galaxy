@@ -70,7 +70,7 @@ const synthesizeSpeech = async (text, language) => {
       'Content-Type':     'application/json',
     },
     body: JSON.stringify({
-      model_id:   'sonic-2',           // Latest, fastest model with full language support
+      model_id:   'sonic-3',           // Latest model with full multilingual support on paid plans
       language:   cartesiaLang,        // Required: BCP-47 language code
       transcript: text.trim(),
       voice: {

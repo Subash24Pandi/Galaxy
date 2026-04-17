@@ -56,7 +56,7 @@ const transcribeAudio = async (audioInput, language) => {
     knownLength: audioBuffer.length,
   });
   form.append('model', 'saarika:v2.5');
-  // Optional: form.append('language_code', langCode); // Saaras often auto-detects better without this, but we'll include it for stability
+  form.append('language_code', langCode);  // Explicit lang prevents auto-detect failures
 
   console.log(`[STT] Sarvam | ${audioBuffer.length}B | expected_lang=${langCode}`);
 

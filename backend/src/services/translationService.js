@@ -73,7 +73,7 @@ const translateText = async (text, sourceLang, targetLang) => {
   // ── STEP 1: Sarvam NMT (Primary — fast neural translation) ──────────────────
   try {
     const nmtCtrl  = new AbortController();
-    const nmtTimer = setTimeout(() => nmtCtrl.abort(), 10000); // 10s cap
+    const nmtTimer = setTimeout(() => nmtCtrl.abort(), 6000); // 6s cap — fail fast
     const nmtRes = await fetch('https://api.sarvam.ai/translate', {
       method: 'POST',
       headers: {
@@ -115,7 +115,7 @@ const translateText = async (text, sourceLang, targetLang) => {
   console.log(`[Translation] NMT failed → LLM fallback for ${targetName}`);
   try {
     const llmCtrl  = new AbortController();
-    const llmTimer = setTimeout(() => llmCtrl.abort(), 20000); // 20s cap
+    const llmTimer = setTimeout(() => llmCtrl.abort(), 12000); // 12s cap
     const llmRes = await fetch('https://api.sarvam.ai/v1/chat/completions', {
       method: 'POST',
       headers: {

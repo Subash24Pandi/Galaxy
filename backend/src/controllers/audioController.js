@@ -89,9 +89,9 @@ const handleAudioUtterance = async (req, res) => {
       io.to(room).emit('session_status', { message: 'Translation error — please try again', type: 'error' });
       return;
     }
-    // Trim translation to max 300 chars for TTS safety (spoken utterances are short)
-    const ttsText = translatedText.length > 300
-      ? translatedText.substring(0, 300).replace(/[,.]?$/, '…')
+    // Trim translation to max 200 chars for TTS (shorter = faster audio generation)
+    const ttsText = translatedText.length > 200
+      ? translatedText.substring(0, 200).replace(/[,.]?$/, '…')
       : translatedText;
 
     console.log(`[Pipeline] Translation ✅ ${transMs}ms: "${ttsText.substring(0, 60)}"`);

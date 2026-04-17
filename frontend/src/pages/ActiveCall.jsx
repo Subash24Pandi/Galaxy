@@ -30,7 +30,7 @@ const SAMPLE_RATE = 16000;       // Hz — optimal for STT
 const SILENCE_MS       = 500;     // 0.5s pause triggers translation — fast but natural
 const MAX_CHUNK_MS     = 15000;   // Sentence cap
 const VAD_THRESHOLD    = 0.05;    // Aggressive fan/AC filter
-const MIN_AUDIO_BYTES  = 15000;   // Reject background noise and short hums
+const MIN_AUDIO_BYTES  = 8000;    // Process even short 'yes/no/ok' responses quickly
 const STREAM_INTERVAL_MS = 999999; // End-of-sentence mode
 
 const LANG_LABELS = {

@@ -125,6 +125,8 @@ const ActiveCall = () => {
   const pipelineQueueRef     = useRef(0);      // Track in-flight requests
   const lastStreamSentRef    = useRef(0);      // Timestamp of last mid-speech chunk sent
   const isPlayingRef         = useRef(false);  // True while peer TTS audio is playing — pause VAD to prevent echo
+  const audioQueueRef        = useRef([]);     // Queue of incoming audio buffers to play sequentially
+  const isPlayingAudioRef    = useRef(false);  // True while queue is actively playing
 
   // Keep targetLang ref in sync
   useEffect(() => { targetLangRef.current = targetLang; }, [targetLang]);
@@ -219,17 +221,22 @@ const ActiveCall = () => {
       }
     });
 
-    // Play incoming audio (only if this is the targetRole)
-    socket.on('audio_playback', async (data) => {
-      if (data.targetRole !== role) return;
-      if (!data.audioBase64) return;
+    // ── Sequential Audio Queue — plays translations one at a time, no overlaps ──
+    const playNextInQueue = async () => {
+      if (isPlayingAudioRef.current) return; // already playing
+      if (audioQueueRef.current.length === 0) return; // nothing to play
+
+      const nextAudioBase64 = audioQueueRef.current.shift();
+      isPlayingAudioRef.current = true;
+      isPlayingRef.current      = true;
+      setIsPeerPlaying(true);
 
       try {
         const ctx = audioContextRef.current;
-        if (!ctx) return;
+        if (!ctx) { isPlayingAudioRef.current = false; return; }
         if (ctx.state === 'suspended') await ctx.resume();
 
-        const binary = window.atob(data.audioBase64);
+        const binary = window.atob(nextAudioBase64);
         const bytes  = new Uint8Array(binary.length);
         for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
 
@@ -238,20 +245,33 @@ const ActiveCall = () => {
         source.buffer     = audioBuffer;
         source.connect(ctx.destination);
 
-        // ── ECHO FIX: Pause VAD while TTS is playing ─────────────────────────────
-        // Prevents mic from picking up TTS audio and creating an echo loop
-        isPlayingRef.current = true;
-        setIsPeerPlaying(true);
         source.onended = () => {
-          isPlayingRef.current = false;
+          isPlayingAudioRef.current = false;
+          isPlayingRef.current      = false;
           setIsPeerPlaying(false);
-          // Reset speech tracking so echo tail doesn't count as a new utterance
           lastSpeechTimeRef.current = Date.now();
+          // Play next item in queue after this one finishes
+          playNextInQueue();
         };
         source.start(0);
       } catch (err) {
         console.error('[Playback] Failed to decode/play audio:', err);
+        isPlayingAudioRef.current = false;
+        isPlayingRef.current      = false;
+        setIsPeerPlaying(false);
+        // Try next even if this one failed
+        playNextInQueue();
       }
+    };
+
+    // Play incoming audio (only if this is the targetRole)
+    socket.on('audio_playback', (data) => {
+      if (data.targetRole !== role) return;
+      if (!data.audioBase64) return;
+
+      // Push to queue and trigger playback (if not already playing)
+      audioQueueRef.current.push(data.audioBase64);
+      playNextInQueue();
     });
 
     return () => {

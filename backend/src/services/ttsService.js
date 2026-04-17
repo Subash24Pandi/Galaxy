@@ -11,12 +11,12 @@
 // VOICE MAP — User-provided Cartesia Voice IDs
 // ─────────────────────────────────────────────────────────────────────────────
 const VOICE_MAP = {
-  'en':  '7c6219d2-e8d2-462c-89d8-7ecba7c75d65',
-  'hi':  '7c6219d2-e8d2-462c-89d8-7ecba7c75d65',
+  'en':  '9626c31c-bec5-4cca-baa8-f8ba9e84c8bc',
+  'hi':  'faf0731e-dfb9-4cfc-8119-259a79b27e12',
   'ta':  '25d2c432-139c-4035-bfd6-9baaabcdd006',
   'bho': '7c6219d2-e8d2-462c-89d8-7ecba7c75d65',
   'te':  'cf061d8b-a752-4865-81a2-57570a6e0565',
-  'kn':  '7c6219d2-e8d2-462c-89d8-7ecba7c75d65',
+  'kn':  '6baae46d-1226-45b5-a976-c7f9b797aae2',
   'bn':  '2ba861ea-7cdc-43d1-8608-4045b5a41de5',
   'gu':  '4590a461-bc68-4a50-8d14-ac04f5923d22',
   'mr':  '5c32dce6-936a-4892-b131-bafe474afe5f',

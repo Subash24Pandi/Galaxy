@@ -27,10 +27,11 @@ import {
 const SOCKET_URL  = import.meta.env.VITE_BACKEND_URL || 'http://localhost:5000';
 const API_BASE    = import.meta.env.VITE_BACKEND_URL || ''; 
 const SAMPLE_RATE = 16000;       // Hz — optimal for STT
-const SILENCE_MS       = 500;     // 0.5s pause triggers translation — fast but natural
+const SILENCE_MS       = 500;     // 0.5s pause triggers translation
 const MAX_CHUNK_MS     = 15000;   // Sentence cap
-const VAD_THRESHOLD    = 0.05;    // Aggressive fan/AC filter
-const MIN_AUDIO_BYTES  = 8000;    // Process even short 'yes/no/ok' responses quickly
+const VAD_THRESHOLD    = 0.08;    // Raised: filters fan/AC noise better
+const MIN_AUDIO_BYTES  = 12000;   // Minimum to avoid noise-only chunks
+const MIN_SPEECH_MS    = 400;     // Must speak for 400ms+ to be a real utterance
 const STREAM_INTERVAL_MS = 999999; // End-of-sentence mode
 
 const LANG_LABELS = {
@@ -422,13 +423,18 @@ const ActiveCall = () => {
 
               // ── END OF SENTENCE: send full buffer when silence detected ─────────
               if (silence > SILENCE_MS) {
+                const speechDuration = Date.now() - (recordingStartRef.current || Date.now());
                 isRecordingRef.current    = false;
                 recordingStartRef.current = null;
                 const buf = [...pcmDataRef.current];
                 pcmDataRef.current = [];
-                if (buf.length > 0) {
-                  console.log(`[VAD] 🔇 Sentence finished → sending ${buf.length} samples`);
+
+                // Reject brief noise spikes under MIN_SPEECH_MS (fan, cough, etc.)
+                if (buf.length > 0 && speechDuration >= MIN_SPEECH_MS) {
+                  console.log(`[VAD] 🔇 Speech ${speechDuration}ms → sending ${buf.length} samples`);
                   sendChunk(buf);
+                } else if (buf.length > 0) {
+                  console.log(`[VAD] ⚡ Noise spike ${speechDuration}ms < ${MIN_SPEECH_MS}ms — discarded`);
                 }
               }
             }

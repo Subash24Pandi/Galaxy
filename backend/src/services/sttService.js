@@ -137,26 +137,26 @@ const transcribeAudio = async (audioInput, language) => {
 
   console.log(`[STT] ${audioBuffer.length}B | lang=${sarvamCode}`);
 
-  // ── Try Sarvam first ───────────────────────────────────────────────────────
-  try {
-    const transcript = await transcribeWithSarvam(audioBuffer, sarvamCode);
-    if (transcript.length > 500) throw new Error('SILENT:Background media detected');
-    console.log(`[STT] ✅ Sarvam: "${transcript.substring(0, 80)}"`);
-    return transcript;
-  } catch (err) {
-    if (err.message.startsWith('SILENT:')) throw err;
-    console.warn(`[STT] Sarvam failed (${err.message}) → trying ElevenLabs`);
-  }
-
-  // ── Fallback: ElevenLabs ───────────────────────────────────────────────────
+  // ── PRIMARY: ElevenLabs (faster, ~1-2 sec) ────────────────────────────────
   try {
     const transcript = await transcribeWithElevenLabs(audioBuffer, elevenCode);
     if (transcript.length > 500) throw new Error('SILENT:Background media detected');
-    console.log(`[STT] ✅ ElevenLabs fallback: "${transcript.substring(0, 80)}"`);
+    console.log(`[STT] ✅ ElevenLabs: "${transcript.substring(0, 80)}"`);
     return transcript;
   } catch (err) {
     if (err.message.startsWith('SILENT:')) throw err;
-    throw new Error(`[STT] Both engines failed: ${err.message}`);
+    console.warn(`[STT] ElevenLabs failed (${err.message}) → trying Sarvam`);
+  }
+
+  // ── FALLBACK: Sarvam saarika:v2.5 ────────────────────────────────────────
+  try {
+    const transcript = await transcribeWithSarvam(audioBuffer, sarvamCode);
+    if (transcript.length > 500) throw new Error('SILENT:Background media detected');
+    console.log(`[STT] ✅ Sarvam fallback: "${transcript.substring(0, 80)}"`);
+    return transcript;
+  } catch (err) {
+    if (err.message.startsWith('SILENT:')) throw err;
+    throw new Error(`SILENT:Both engines failed: ${err.message}`);
   }
 };
 

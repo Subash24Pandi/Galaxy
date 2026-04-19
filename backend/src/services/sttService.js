@@ -73,7 +73,7 @@ const transcribeWithSarvam = async (audioBuffer, langCode) => {
         'api-subscription-key': apiKey,
         ...form.getHeaders(),
       },
-      timeout: 8000,
+      timeout: 4000,
     }
   );
 
@@ -109,7 +109,7 @@ const transcribeWithElevenLabs = async (audioBuffer, langCode) => {
         ...form.getHeaders(),
       },
       maxBodyLength: Infinity,
-      timeout: 12000,
+      timeout: 6000,
     }
   );
 

@@ -104,32 +104,41 @@ const handleAudioUtterance = async (req, res) => {
       timestamp:    new Date().toISOString(),
     });
 
-    // ── STEP 3: TTS — Sentence-level Streaming for Low Latency ────────────────
-    // We split the full text into sentences and synthesize each one immediately.
-    // This allows the first sentence to play while the others are still generating.
+    // ── STEP 3: TTS — Parallel Sentence Synthesis for Ultra-Low Latency ──────
     const sentences = ttsText
       .split(/(?<=[.!?।])\s+/)
       .map(s => s.trim())
       .filter(s => s.length > 1);
 
-    console.log(`[Pipeline] TTS streaming ${sentences.length} sentences...`);
+    console.log(`[Pipeline] Parallel TTS for ${sentences.length} sentences...`);
 
-    for (const sentence of sentences) {
+    // We start all TTS calls in parallel but wait for them in order to maintain flow
+    const ttsPromises = sentences.map(async (sentence, index) => {
       try {
         const sentenceAudio = await ttsService.synthesizeSpeech(sentence, outputLang);
+        return { index, sentence, audio: sentenceAudio };
+      } catch (err) {
+        console.error(`[Pipeline] TTS chunk ${index} failed: ${err.message}`);
+        return null;
+      }
+    });
+
+    // Resolve and emit in order (First-Ready-First-Sent optimization is possible but harder)
+    // Here we wait for all to start, but we can emit as soon as the 'next' one is ready.
+    for (const promise of ttsPromises) {
+      const result = await promise;
+      if (result && result.audio) {
         io.to(room).emit('audio_playback', {
           senderRole:  role,
           clientId:    clientId,
           targetRole,
-          audioBase64: sentenceAudio,
+          audioBase64: result.audio,
           format:      'mp3',
           language:    outputLang,
-          translatedText: sentence,
+          translatedText: result.sentence,
           timestamp:   new Date().toISOString(),
         });
-        console.log(`[Pipeline] Sent TTS chunk: "${sentence.substring(0, 30)}..."`);
-      } catch (ttsErr) {
-        console.error(`[Pipeline] TTS chunk failed: ${ttsErr.message}`);
+        console.log(`[Pipeline] Sent TTS chunk ${result.index + 1}/${sentences.length}`);
       }
     }
 

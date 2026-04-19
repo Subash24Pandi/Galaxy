@@ -84,7 +84,7 @@ const translateText = async (text, sourceLang, targetLang) => {
         input:                trimmed,
         source_language_code: src,
         target_language_code: tgt,
-        mode:                 'modern-colloquial',
+        mode:                 'formal',        // Use formal for higher precision as requested
         enable_preprocessing: true,
       }),
       signal: nmtCtrl.signal,
@@ -94,28 +94,23 @@ const translateText = async (text, sourceLang, targetLang) => {
     if (nmtRes.ok) {
       const nmtData = await nmtRes.json();
       if (nmtData.translated_text) {
-        const result = nmtData.translated_text.trim().replace(/^["""'']|["""'']$/g, '');
+        const result = nmtData.translated_text.trim();
         if (result) {
           console.log(`[Translation] NMT ✅ "${result.substring(0, 60)}"`);
           return result;
         }
-      } else {
-        console.warn('[Translation] NMT returned no translated_text:', JSON.stringify(nmtData).substring(0, 200));
       }
-    } else {
-      const errBody = await nmtRes.text();
-      console.warn(`[Translation] NMT HTTP ${nmtRes.status}: ${errBody.substring(0, 200)}`);
     }
   } catch (err) {
     console.warn('[Translation] NMT error:', err.message);
   }
 
   // ── STEP 2: Sarvam LLM Fallback (sarvam-m) ──────────────────────────────────
-  // Note: sarvam-m is a reasoning model — MUST strip <think> tags from output
+  // Note: we use a strict prompt to prevent model hallucinations
   console.log(`[Translation] NMT failed → LLM fallback for ${targetName}`);
   try {
     const llmCtrl  = new AbortController();
-    const llmTimer = setTimeout(() => llmCtrl.abort(), 12000); // 12s cap
+    const llmTimer = setTimeout(() => llmCtrl.abort(), 10000); // 10s cap
     const llmRes = await fetch('https://api.sarvam.ai/v1/chat/completions', {
       method: 'POST',
       headers: {
@@ -127,22 +122,18 @@ const translateText = async (text, sourceLang, targetLang) => {
         messages: [
           {
             role: 'system',
-            content: `You are a world-class real-time spoken language interpreter for ${targetName}.
-
-RULES:
-1. Translate MEANING-FOR-MEANING — preserve 100% of the intent, slang, and context.
-2. Use natural, highly colloquial ${targetName} as spoken by native speakers in daily conversation.
-3. Fix all voice-to-text errors in the input before translating.
-4. If multiple sentences are provided, translate them together as one continuous thought.
-5. DO NOT add explanations, notes, or extra words.
-6. Output ONLY the ${targetName} translation in its native script.`,
+            content: `CRITICAL INSTRUCTION: You are a professional translator. 
+- Translate the input text exactly into ${targetName}.
+- DO NOT add any extra information, notes, or creative interpretations.
+- DO NOT mention personal topics like gender or orientation unless explicitly stated in the source.
+- ONLY output the translated text. No quotes. No explanations.`,
           },
           {
             role: 'user',
             content: trimmed,
           },
         ],
-        temperature: 0.05,
+        temperature: 0.01, // Near-zero for maximum accuracy
         max_tokens:  400,
       }),
       signal: llmCtrl.signal,

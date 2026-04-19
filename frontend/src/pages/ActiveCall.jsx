@@ -27,11 +27,11 @@ import {
 const SOCKET_URL  = import.meta.env.VITE_BACKEND_URL || 'http://localhost:5000';
 const API_BASE    = import.meta.env.VITE_BACKEND_URL || ''; 
 const SAMPLE_RATE = 16000;       // Hz — optimal for STT
-const SILENCE_MS       = 2000;    // 2.0s pause triggers send — allows full sentences without splitting
+const SILENCE_MS       = 1000;    // 1.0s pause triggers send — balanced for 5s goal
 const MAX_CHUNK_MS     = 20000;   // 20s max recording cap
-const VAD_THRESHOLD    = 0.15;    // Balanced noise filter
-const MIN_AUDIO_BYTES  = 20000;   // Avoid tiny noise-only chunks
-const MIN_SPEECH_MS    = 800;     // 0.8s+ speech required to avoid coughs/clicks
+const VAD_THRESHOLD    = 0.10;    // Lowered threshold to capture all voices
+const MIN_AUDIO_BYTES  = 15000;   // Balanced floor
+const MIN_SPEECH_MS    = 600;     // 0.6s+ speech required
 const STREAM_INTERVAL_MS = 999999; // End-of-sentence mode
 
 const LANG_LABELS = {
@@ -265,12 +265,14 @@ const ActiveCall = () => {
       }
     };
 
-    // Play incoming audio (only if this is the targetRole)
+    // Play incoming audio (play if it's from the OTHER person)
     socket.on('audio_playback', (data) => {
-      if (data.targetRole !== role) return;
+      // Logic: If it's NOT from me, I should hear it. 
+      // This handles cases where roles might be accidentally duplicated.
+      if (data.senderRole === role) return; 
       if (!data.audioBase64) return;
 
-      // Push to queue and trigger playback (if not already playing)
+      // Push to queue and trigger playback
       audioQueueRef.current.push(data.audioBase64);
       playNextInQueue();
     });

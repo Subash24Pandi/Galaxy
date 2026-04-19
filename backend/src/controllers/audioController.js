@@ -95,7 +95,7 @@ const handleAudioUtterance = async (req, res) => {
 
     console.log(`[Pipeline] Translation ✅ ${transMs}ms: "${ttsText.substring(0, 60)}"`);
 
-    // Update transcript with final translation
+    // Update transcript with final translation (one bubble)
     io.to(room).emit('transcript_update', {
       role,
       phase:        'translated',
@@ -104,24 +104,35 @@ const handleAudioUtterance = async (req, res) => {
       timestamp:    new Date().toISOString(),
     });
 
-    // ── STEP 3: TTS — Single call for full translated text (no splitting) ────
-    const ttsStart = Date.now();
-    const ttsAudioBase64 = await ttsService.synthesizeSpeech(ttsText, outputLang);
-    const ttsMs = Date.now() - ttsStart;
+    // ── STEP 3: TTS — Sentence-level Streaming for Low Latency ────────────────
+    // We split the full text into sentences and synthesize each one immediately.
+    // This allows the first sentence to play while the others are still generating.
+    const sentences = ttsText
+      .split(/(?<=[.!?।])\s+/)
+      .map(s => s.trim())
+      .filter(s => s.length > 1);
 
-    console.log(`[Pipeline] TTS ✅ ${ttsMs}ms | total=${Date.now() - startTime}ms`);
+    console.log(`[Pipeline] TTS streaming ${sentences.length} sentences...`);
 
-    // ── STEP 4: Push full audio to peer ─────────────────────────────────────
-    io.to(room).emit('audio_playback', {
-      targetRole,
-      audioBase64: ttsAudioBase64,
-      format:      'mp3',
-      language:    outputLang,
-      translatedText,
-      timestamp:   new Date().toISOString(),
-    });
+    for (const sentence of sentences) {
+      try {
+        const sentenceAudio = await ttsService.synthesizeSpeech(sentence, outputLang);
+        io.to(room).emit('audio_playback', {
+          senderRole:  role,
+          targetRole,
+          audioBase64: sentenceAudio,
+          format:      'mp3',
+          language:    outputLang,
+          translatedText: sentence,
+          timestamp:   new Date().toISOString(),
+        });
+        console.log(`[Pipeline] Sent TTS chunk: "${sentence.substring(0, 30)}..."`);
+      } catch (ttsErr) {
+        console.error(`[Pipeline] TTS chunk failed: ${ttsErr.message}`);
+      }
+    }
 
-    console.log(`[Pipeline] ✅ Audio pushed to ${targetRole} | total=${Date.now() - startTime}ms`);
+    console.log(`[Pipeline] ✅ All chunks sent | total=${Date.now() - startTime}ms`);
 
     // ── STEP 5: Persist to DB (non-blocking) ────────────────────────────────
     saveMessage({

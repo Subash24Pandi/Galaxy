@@ -105,34 +105,24 @@ const handleAudioUtterance = async (req, res) => {
       timestamp:    new Date().toISOString(),
     });
 
-    // ── STEP 3: TTS — Sentence-by-Sentence for Minimum Latency ─────────────
-    // Split into sentences so first audio plays while rest is still generating
-    const sentences = ttsText
-      .split(/(?<=[.!?।])\s+/)
-      .map(s => s.trim())
-      .filter(s => s.length > 1);
-
+    // ── STEP 3: TTS — Single call for full translated text (no splitting) ────
     const ttsStart = Date.now();
+    const ttsAudioBase64 = await ttsService.synthesizeSpeech(ttsText, outputLang);
+    const ttsMs = Date.now() - ttsStart;
 
-    for (const sentence of sentences) {
-      try {
-        const sentenceAudio = await ttsService.synthesizeSpeech(sentence, outputLang);
-        // Emit each sentence audio immediately as it's ready
-        io.to(room).emit('audio_playback', {
-          targetRole,
-          audioBase64: sentenceAudio,
-          format:      'mp3',
-          language:    outputLang,
-          translatedText: sentence,
-          timestamp:   new Date().toISOString(),
-        });
-        console.log(`[Pipeline] TTS sentence ✅ "${sentence.substring(0, 40)}"`);
-      } catch (ttsErr) {
-        console.error(`[Pipeline] TTS sentence failed: ${ttsErr.message}`);
-      }
-    }
+    console.log(`[Pipeline] TTS ✅ ${ttsMs}ms | total=${Date.now() - startTime}ms`);
 
-    console.log(`[Pipeline] ✅ All sentences pushed | total=${Date.now() - startTime}ms`);
+    // ── STEP 4: Push full audio to peer ─────────────────────────────────────
+    io.to(room).emit('audio_playback', {
+      targetRole,
+      audioBase64: ttsAudioBase64,
+      format:      'mp3',
+      language:    outputLang,
+      translatedText,
+      timestamp:   new Date().toISOString(),
+    });
+
+    console.log(`[Pipeline] ✅ Audio pushed to ${targetRole} | total=${Date.now() - startTime}ms`);
 
     // ── STEP 5: Persist to DB (non-blocking) ────────────────────────────────
     saveMessage({

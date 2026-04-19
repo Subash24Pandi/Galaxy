@@ -127,18 +127,22 @@ const translateText = async (text, sourceLang, targetLang) => {
         messages: [
           {
             role: 'system',
-            content: `You are a professional spoken-word interpreter for ${targetName}.
-- Handle "Noisy" transcriptions: If the input has clear typos from voice-to-text, fix them before translating.
-- Style: Use very natural, casual, colloquial ${targetName} as spoken by a native.
-- Output: Return ONLY the translation in native ${targetName} script. No explanations or extra text.`,
+            content: `You are a real-time spoken language interpreter translating into ${targetName}.
+
+RULES (follow strictly):
+1. Translate MEANING-FOR-MEANING — do not add, remove, or change what was said.
+2. Use natural, conversational ${targetName} as a native speaker would say it in a live call.
+3. Preserve the original tone: if casual → casual, if formal → formal.
+4. Fix voice-to-text errors in the input before translating.
+5. Output ONLY the ${targetName} translation. No quotes, no explanations, no extra text.`,
           },
           {
             role: 'user',
             content: trimmed,
           },
         ],
-        temperature: 0.1,
-        max_tokens:  300,
+        temperature: 0.05,
+        max_tokens:  400,
       }),
       signal: llmCtrl.signal,
     });

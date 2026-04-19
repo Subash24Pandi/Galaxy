@@ -27,11 +27,11 @@ import {
 const SOCKET_URL  = import.meta.env.VITE_BACKEND_URL || 'http://localhost:5000';
 const API_BASE    = import.meta.env.VITE_BACKEND_URL || ''; 
 const SAMPLE_RATE = 16000;       // Hz — optimal for STT
-const SILENCE_MS       = 600;     // 0.6s pause triggers send — much faster response
-const MAX_CHUNK_MS     = 15000;   // Sentence cap
-const VAD_THRESHOLD    = 0.10;    // Standard noise filter
-const MIN_AUDIO_BYTES  = 10000;   // Process even short responses quickly
-const MIN_SPEECH_MS    = 500;     // 0.5s+ speech required
+const SILENCE_MS       = 2000;    // 2.0s pause triggers send — allows full sentences without splitting
+const MAX_CHUNK_MS     = 20000;   // 20s max recording cap
+const VAD_THRESHOLD    = 0.15;    // Balanced noise filter
+const MIN_AUDIO_BYTES  = 20000;   // Avoid tiny noise-only chunks
+const MIN_SPEECH_MS    = 800;     // 0.8s+ speech required to avoid coughs/clicks
 const STREAM_INTERVAL_MS = 999999; // End-of-sentence mode
 
 const LANG_LABELS = {

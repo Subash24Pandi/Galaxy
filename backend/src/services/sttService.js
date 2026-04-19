@@ -137,22 +137,22 @@ const transcribeAudio = async (audioInput, language) => {
 
   console.log(`[STT] ${audioBuffer.length}B | lang=${sarvamCode}`);
 
-  // ── PRIMARY: ElevenLabs (Fastest STT, ~0.8s latency) ─────────────────────
-  try {
-    const transcript = await transcribeWithElevenLabs(audioBuffer, elevenCode);
-    if (transcript.length > 1000) throw new Error('SILENT:Transcript too long');
-    console.log(`[STT] ✅ ElevenLabs: "${transcript.substring(0, 80)}"`);
-    return transcript;
-  } catch (err) {
-    if (err.message.startsWith('SILENT:')) throw err;
-    console.warn(`[STT] ElevenLabs failed (${err.message}) → trying Sarvam`);
-  }
-
-  // ── FALLBACK: Sarvam saarika:v2.5 (Best for heavy accents) ───────────────
+  // ── PRIMARY: Sarvam saarika:v2.5 (Optimized for Indian accents) ─────────
   try {
     const transcript = await transcribeWithSarvam(audioBuffer, sarvamCode);
     if (transcript.length > 1000) throw new Error('SILENT:Transcript too long');
-    console.log(`[STT] ✅ Sarvam fallback: "${transcript.substring(0, 80)}"`);
+    console.log(`[STT] ✅ Sarvam: "${transcript.substring(0, 80)}"`);
+    return transcript;
+  } catch (err) {
+    if (err.message.startsWith('SILENT:')) throw err;
+    console.warn(`[STT] Sarvam failed (${err.message}) → trying ElevenLabs`);
+  }
+
+  // ── FALLBACK: ElevenLabs (High accuracy backup) ──────────────────────────
+  try {
+    const transcript = await transcribeWithElevenLabs(audioBuffer, elevenCode);
+    if (transcript.length > 1000) throw new Error('SILENT:Transcript too long');
+    console.log(`[STT] ✅ ElevenLabs fallback: "${transcript.substring(0, 80)}"`);
     return transcript;
   } catch (err) {
     if (err.message.startsWith('SILENT:')) throw err;

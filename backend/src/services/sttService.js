@@ -73,7 +73,7 @@ const transcribeWithSarvam = async (audioBuffer, langCode) => {
         'api-subscription-key': apiKey,
         ...form.getHeaders(),
       },
-      timeout: 15000,
+      timeout: 8000,
     }
   );
 
@@ -109,7 +109,7 @@ const transcribeWithElevenLabs = async (audioBuffer, langCode) => {
         ...form.getHeaders(),
       },
       maxBodyLength: Infinity,
-      timeout: 20000,
+      timeout: 12000,
     }
   );
 
@@ -137,22 +137,22 @@ const transcribeAudio = async (audioInput, language) => {
 
   console.log(`[STT] ${audioBuffer.length}B | lang=${sarvamCode}`);
 
-  // ── PRIMARY: ElevenLabs (faster, ~1-2 sec) ────────────────────────────────
-  try {
-    const transcript = await transcribeWithElevenLabs(audioBuffer, elevenCode);
-    if (transcript.length > 500) throw new Error('SILENT:Background media detected');
-    console.log(`[STT] ✅ ElevenLabs: "${transcript.substring(0, 80)}"`);
-    return transcript;
-  } catch (err) {
-    if (err.message.startsWith('SILENT:')) throw err;
-    console.warn(`[STT] ElevenLabs failed (${err.message}) → trying Sarvam`);
-  }
-
-  // ── FALLBACK: Sarvam saarika:v2.5 ────────────────────────────────────────
+  // ── PRIMARY: Sarvam saarika:v2.5 (Fast & optimized for Indian accents) ──
   try {
     const transcript = await transcribeWithSarvam(audioBuffer, sarvamCode);
     if (transcript.length > 500) throw new Error('SILENT:Background media detected');
-    console.log(`[STT] ✅ Sarvam fallback: "${transcript.substring(0, 80)}"`);
+    console.log(`[STT] ✅ Sarvam: "${transcript.substring(0, 80)}"`);
+    return transcript;
+  } catch (err) {
+    if (err.message.startsWith('SILENT:')) throw err;
+    console.warn(`[STT] Sarvam failed (${err.message}) → trying ElevenLabs`);
+  }
+
+  // ── FALLBACK: ElevenLabs (High accuracy backup) ──────────────────────────
+  try {
+    const transcript = await transcribeWithElevenLabs(audioBuffer, elevenCode);
+    if (transcript.length > 500) throw new Error('SILENT:Background media detected');
+    console.log(`[STT] ✅ ElevenLabs fallback: "${transcript.substring(0, 80)}"`);
     return transcript;
   } catch (err) {
     if (err.message.startsWith('SILENT:')) throw err;

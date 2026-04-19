@@ -83,10 +83,9 @@ const handleAudioUtterance = async (req, res) => {
     const translatedText = await translationService.translateText(originalText, inputLang, outputLang);
     const transMs = Date.now() - transStart;
 
-    // Safety guard: reject if think tags leaked through or text is abnormally long
-    if (!translatedText || translatedText.toLowerCase().includes('<think>')) {
-      console.error('[Pipeline] Translation contained <think> tags — aborting TTS');
-      io.to(room).emit('session_status', { message: 'Translation error — please try again', type: 'error' });
+    // Safety guard: reject if think tags leaked through OR translation is empty (noise filter)
+    if (!translatedText || translatedText.trim() === '' || translatedText.toLowerCase().includes('<think>')) {
+      console.warn('[Pipeline] Translation empty or invalid (noise filter) — aborting');
       return;
     }
     // Trim translation to max 200 chars for TTS (shorter = faster audio generation)

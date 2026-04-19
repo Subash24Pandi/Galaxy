@@ -27,11 +27,11 @@ import {
 const SOCKET_URL  = import.meta.env.VITE_BACKEND_URL || 'http://localhost:5000';
 const API_BASE    = import.meta.env.VITE_BACKEND_URL || ''; 
 const SAMPLE_RATE = 16000;       // Hz — optimal for STT
-const SILENCE_MS       = 600;     // 0.6s pause triggers send
-const MAX_CHUNK_MS     = 15000;   // Sentence cap
-const VAD_THRESHOLD    = 0.10;    // Strong noise filter — ignores fan/TV/AC
-const MIN_AUDIO_BYTES  = 15000;   // Reject small noise-only chunks
-const MIN_SPEECH_MS    = 700;     // Must speak 700ms+ — filters coughs/clicks
+const SILENCE_MS       = 1200;    // 1.2s pause triggers send — better for natural pauses
+const MAX_CHUNK_MS     = 20000;   // Sentence cap (increased to 20s)
+const VAD_THRESHOLD    = 0.18;    // Very aggressive noise filter
+const MIN_AUDIO_BYTES  = 30000;   // Higher floor for audio size
+const MIN_SPEECH_MS    = 1200;    // Must speak 1.2s+ — filters most background noise
 const STREAM_INTERVAL_MS = 999999; // End-of-sentence mode
 
 const LANG_LABELS = {
@@ -379,50 +379,51 @@ const ActiveCall = () => {
 
         const dataArray = new Uint8Array(analyser.frequencyBinCount);
 
+        // Use a moving average for RMS to smooth out noise spikes
+        let smoothedRms = 0;
         const tick = () => {
           if (!isVADInitRef.current) return;
           analyser.getByteTimeDomainData(dataArray);
 
-          // Compute RMS amplitude
           let sum = 0;
           for (let i = 0; i < dataArray.length; i++) {
             const amp = (dataArray[i] / 128) - 1;
             sum += amp * amp;
           }
           const rms = Math.sqrt(sum / dataArray.length);
+          
+          // Smoothing (0.2 alpha = 80% old, 20% new)
+          smoothedRms = (smoothedRms * 0.8) + (rms * 0.2);
 
           if (isMutedRef.current || isPlayingRef.current) {
-            // Muted OR peer audio is playing — freeze VAD to prevent echo
             setVolume(0);
             if (isRecordingRef.current && !isPlayingRef.current) {
-              // Only flush on actual mute, not during playback
               isRecordingRef.current = false;
               const buf = [...pcmDataRef.current];
               pcmDataRef.current = [];
               recordingStartRef.current = null;
               if (buf.length > 0) sendChunk(buf);
             } else if (isPlayingRef.current) {
-              // During playback: discard any mic data (echo)
               pcmDataRef.current = [];
             }
           } else {
-            setVolume(rms);
+            setVolume(smoothedRms);
 
-            if (rms > VAD_THRESHOLD) {
+            if (smoothedRms > VAD_THRESHOLD) {
               lastSpeechTimeRef.current = Date.now();
               if (!isRecordingRef.current) {
                 isRecordingRef.current     = true;
                 recordingStartRef.current  = Date.now();
-                lastStreamSentRef.current  = Date.now(); // reset → first chunk fires 2s AFTER speech starts
                 console.log('[VAD] 🎙️ Speech started');
               }
             }
 
             if (isRecordingRef.current) {
               const silence = Date.now() - lastSpeechTimeRef.current;
+              const duration = Date.now() - (recordingStartRef.current || Date.now());
 
-              // ── END OF SENTENCE: send full buffer when silence detected ─────────
-              if (silence > SILENCE_MS) {
+              // ── END OF SENTENCE: send full buffer when silence detected OR max duration reached ──
+              if (silence > SILENCE_MS || duration > MAX_CHUNK_MS) {
                 const speechDuration = Date.now() - (recordingStartRef.current || Date.now());
                 isRecordingRef.current    = false;
                 recordingStartRef.current = null;
@@ -431,7 +432,7 @@ const ActiveCall = () => {
 
                 // Reject brief noise spikes under MIN_SPEECH_MS (fan, cough, etc.)
                 if (buf.length > 0 && speechDuration >= MIN_SPEECH_MS) {
-                  console.log(`[VAD] 🔇 Speech ${speechDuration}ms → sending ${buf.length} samples`);
+                  console.log(`[VAD] 🔇 ${duration > MAX_CHUNK_MS ? 'Max duration' : 'Silence'} → sending ${buf.length} samples`);
                   sendChunk(buf);
                 } else if (buf.length > 0) {
                   console.log(`[VAD] ⚡ Noise spike ${speechDuration}ms < ${MIN_SPEECH_MS}ms — discarded`);

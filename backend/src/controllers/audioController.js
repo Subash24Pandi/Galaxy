@@ -25,7 +25,7 @@ const { saveMessage, createSession } = require('../models/sessionModel');
  * Emits translated audio + transcript to the session room.
  */
 const handleAudioUtterance = async (req, res) => {
-  const { sessionId, role, audioBase64, inputLang, outputLang } = req.body;
+  const { sessionId, role, clientId, audioBase64, inputLang, outputLang } = req.body;
   const io = req.app.get('io');
 
   // ── Validation ──────────────────────────────────────────────────────────────
@@ -49,7 +49,7 @@ const handleAudioUtterance = async (req, res) => {
   // Respond immediately so client can capture next chunk (non-blocking UX)
   res.json({ success: true, message: 'Processing audio chunk...' });
 
-  console.log(`\n[Pipeline] ▶ ${role.toUpperCase()} | session=${sessionId} | ${inputLang} → ${outputLang}`);
+  console.log(`\n[Pipeline] ▶ ${role.toUpperCase()} (ID: ${clientId}) | session=${sessionId} | ${inputLang} → ${outputLang}`);
 
   try {
     // Ensure session exists
@@ -119,6 +119,7 @@ const handleAudioUtterance = async (req, res) => {
         const sentenceAudio = await ttsService.synthesizeSpeech(sentence, outputLang);
         io.to(room).emit('audio_playback', {
           senderRole:  role,
+          clientId:    clientId,
           targetRole,
           audioBase64: sentenceAudio,
           format:      'mp3',

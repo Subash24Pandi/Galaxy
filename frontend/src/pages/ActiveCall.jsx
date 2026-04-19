@@ -27,12 +27,12 @@ import {
 const SOCKET_URL  = import.meta.env.VITE_BACKEND_URL || 'http://localhost:5000';
 const API_BASE    = import.meta.env.VITE_BACKEND_URL || ''; 
 const SAMPLE_RATE = 16000;       // Hz — optimal for STT
-const SILENCE_MS       = 1000;    // 1.0s pause triggers send — balanced for 5s goal
+const SILENCE_MS       = 1000;    // 1.0s pause triggers send
 const MAX_CHUNK_MS     = 20000;   // 20s max recording cap
-const VAD_THRESHOLD    = 0.10;    // Lowered threshold to capture all voices
-const MIN_AUDIO_BYTES  = 15000;   // Balanced floor
+const VAD_THRESHOLD    = 0.06;    // Very sensitive to capture all voices
+const MIN_AUDIO_BYTES  = 12000;   // Capture short words like 'Yes'
 const MIN_SPEECH_MS    = 600;     // 0.6s+ speech required
-const STREAM_INTERVAL_MS = 999999; // End-of-sentence mode
+const STREAM_INTERVAL_MS = 999999; 
 
 const LANG_LABELS = {
   en: 'English', 'en-IN': 'English',
@@ -128,6 +128,7 @@ const ActiveCall = () => {
   const isPlayingRef         = useRef(false);  // True while peer TTS audio is playing — pause VAD to prevent echo
   const audioQueueRef        = useRef([]);     // Queue of incoming audio buffers to play sequentially
   const isPlayingAudioRef    = useRef(false);  // True while queue is actively playing
+  const clientIdRef          = useRef(Math.random().toString(36).substring(7)); // Unique identity
 
   // Keep targetLang ref in sync
   useEffect(() => { targetLangRef.current = targetLang; }, [targetLang]);
@@ -267,9 +268,8 @@ const ActiveCall = () => {
 
     // Play incoming audio (play if it's from the OTHER person)
     socket.on('audio_playback', (data) => {
-      // Logic: If it's NOT from me, I should hear it. 
-      // This handles cases where roles might be accidentally duplicated.
-      if (data.senderRole === role) return; 
+      // Use clientId for perfect loop prevention (better than role check)
+      if (data.clientId === clientIdRef.current) return; 
       if (!data.audioBase64) return;
 
       // Push to queue and trigger playback
@@ -313,6 +313,7 @@ const ActiveCall = () => {
         body: JSON.stringify({
           sessionId:   id,
           role:        role,
+          clientId:    clientIdRef.current, // Send unique ID
           audioBase64: base64,
           inputLang:   inputLang,
           outputLang:  targetLangRef.current,

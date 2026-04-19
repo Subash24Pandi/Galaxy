@@ -88,9 +88,9 @@ const handleAudioUtterance = async (req, res) => {
       console.warn('[Pipeline] Translation empty or invalid (noise filter) — aborting');
       return;
     }
-    // Trim translation to max 200 chars for TTS (shorter = faster audio generation)
-    const ttsText = translatedText.length > 200
-      ? translatedText.substring(0, 200).replace(/[,.]?$/, '…')
+    // Trim translation to max 1000 chars for TTS (prevents truncation for long speech)
+    const ttsText = translatedText.length > 1000
+      ? translatedText.substring(0, 1000).replace(/[,.]?$/, '…')
       : translatedText;
 
     console.log(`[Pipeline] Translation ✅ ${transMs}ms: "${ttsText.substring(0, 60)}"`);

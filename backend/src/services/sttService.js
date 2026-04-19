@@ -140,7 +140,7 @@ const transcribeAudio = async (audioInput, language) => {
   // ── PRIMARY: Sarvam saarika:v2.5 (Fast & optimized for Indian accents) ──
   try {
     const transcript = await transcribeWithSarvam(audioBuffer, sarvamCode);
-    if (transcript.length > 500) throw new Error('SILENT:Background media detected');
+    if (transcript.length > 1000) throw new Error('SILENT:Transcript too long — possible background media');
     console.log(`[STT] ✅ Sarvam: "${transcript.substring(0, 80)}"`);
     return transcript;
   } catch (err) {
@@ -151,7 +151,7 @@ const transcribeAudio = async (audioInput, language) => {
   // ── FALLBACK: ElevenLabs (High accuracy backup) ──────────────────────────
   try {
     const transcript = await transcribeWithElevenLabs(audioBuffer, elevenCode);
-    if (transcript.length > 500) throw new Error('SILENT:Background media detected');
+    if (transcript.length > 1000) throw new Error('SILENT:Transcript too long — possible background media');
     console.log(`[STT] ✅ ElevenLabs fallback: "${transcript.substring(0, 80)}"`);
     return transcript;
   } catch (err) {

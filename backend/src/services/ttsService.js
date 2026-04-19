@@ -1,66 +1,58 @@
 /**
- * TTS Service — Cartesia AI (All Languages)
- *
- * Model: sonic-2 (latest, fastest, supports all languages on paid plan)
- * Output: MP3 (browser-compatible, no partial playback issues unlike WAV PCM)
- *
- * User-provided Voice IDs are used for each language.
+ * TTS Service — Hybrid Engine
+ * 
+ * Engines:
+ *  - Cartesia sonic-3: Used for English (fastest, high quality)
+ *  - Sarvam Saaras: Used for Indian languages (Tamil, Hindi, etc. — best accents)
  */
 
-// ─────────────────────────────────────────────────────────────────────────────
-// VOICE MAP — User-provided Cartesia Voice IDs
-// ─────────────────────────────────────────────────────────────────────────────
+const axios = require('axios');
+
 const VOICE_MAP = {
-  'en':  'e8e5fffb-252c-436d-b842-8879b84445b6',
-  'hi':  'faf0731e-dfb9-4cfc-8119-259a79b27e12',
-  'ta':  '25d2c432-139c-4035-bfd6-9baaabcdd006',
-  'bho': '7c6219d2-e8d2-462c-89d8-7ecba7c75d65',
-  'te':  'cf061d8b-a752-4865-81a2-57570a6e0565',
-  'kn':  '6baae46d-1226-45b5-a976-c7f9b797aae2',
-  'bn':  '2ba861ea-7cdc-43d1-8608-4045b5a41de5',
-  'gu':  '4590a461-bc68-4a50-8d14-ac04f5923d22',
-  'mr':  '5c32dce6-936a-4892-b131-bafe474afe5f',
-  'ml':  '374b80da-e622-4dfc-90f6-1eeb13d331c9',
-  'as':  '2ba861ea-7cdc-43d1-8608-4045b5a41de5',
-  'or':  '25d2c432-139c-4035-bfd6-9baaabcdd006',
-  'default': '7c6219d2-e8d2-462c-89d8-7ecba7c75d65',
+  'en':  'e8e5fffb-252c-436d-b842-8879b84445b6', // Cartesia English
+  'hi':  'meera', // Sarvam Hindi
+  'ta':  'meera', // Sarvam Tamil
+  'te':  'meera',
+  'kn':  'meera',
+  'ml':  'meera',
+  'bn':  'meera',
+  'gu':  'meera',
+  'mr':  'meera',
+  'or':  'meera',
+  'as':  'meera',
+  'bho': 'meera',
+  'default': 'meera',
 };
 
-// Cartesia language code mapping (BCP-47)
-const LANG_MAP = {
-  'en': 'en', 'hi': 'hi', 'ta': 'ta', 'te': 'te',
-  'kn': 'kn', 'ml': 'ml', 'bn': 'bn', 'gu': 'gu',
-  'mr': 'mr', 'or': 'or', 'as': 'as', 'bho': 'hi',
+const SARVAM_LANG_MAP = {
+  'hi': 'hi-IN', 'ta': 'ta-IN', 'te': 'te-IN', 'kn': 'kn-IN',
+  'ml': 'ml-IN', 'bn': 'bn-IN', 'gu': 'gu-IN', 'mr': 'mr-IN',
+  'or': 'or-IN', 'as': 'as-IN', 'bho': 'hi-IN',
 };
 
 const getLangBase = (language) => (language || 'en').toLowerCase().split('-')[0];
 
-const getVoiceId = (language) => {
+/**
+ * Main TTS entry point — routes to the best engine for the language
+ */
+const synthesizeSpeech = async (text, language) => {
   const base = getLangBase(language);
-  return VOICE_MAP[base] || VOICE_MAP['default'];
-};
-
-const getCartesiaLang = (language) => {
-  const base = getLangBase(language);
-  return LANG_MAP[base] || 'en';
+  
+  if (base === 'en') {
+    return synthesizeWithCartesia(text, language);
+  } else {
+    return synthesizeWithSarvam(text, language);
+  }
 };
 
 /**
- * Synthesize speech using Cartesia sonic-2 and return base64-encoded MP3.
- * @param {string} text     - Text to speak
- * @param {string} language - Target language code (e.g. 'ta', 'hi', 'en')
- * @returns {Promise<string>} Base64-encoded MP3
+ * Cartesia Engine (English)
  */
-const synthesizeSpeech = async (text, language) => {
-  if (!text || text.trim() === '') throw new Error('[TTS] No text provided');
-
+const synthesizeWithCartesia = async (text, language) => {
   const apiKey = process.env.CARTESIA_API_KEY;
-  if (!apiKey) throw new Error('[TTS] CARTESIA_API_KEY missing');
+  const voiceId = VOICE_MAP['en'];
 
-  const voiceId      = getVoiceId(language);
-  const cartesiaLang = getCartesiaLang(language);
-
-  console.log(`[TTS] Cartesia sonic-2 | lang=${cartesiaLang} voice=${voiceId} | "${text.substring(0, 60)}"`);
+  console.log(`[TTS] Cartesia sonic-3 | en | "${text.substring(0, 40)}..."`);
 
   const response = await fetch('https://api.cartesia.ai/tts/bytes', {
     method: 'POST',
@@ -70,30 +62,48 @@ const synthesizeSpeech = async (text, language) => {
       'Content-Type':     'application/json',
     },
     body: JSON.stringify({
-      model_id:   'sonic-3',           // Latest model with full multilingual support on paid plans
-      language:   cartesiaLang,        // Required: BCP-47 language code
+      model_id:   'sonic-3',
+      language:   'en',
       transcript: text.trim(),
-      voice: {
-        mode: 'id',
-        id:   voiceId,
-      },
+      voice: { mode: 'id', id: voiceId },
       output_format: {
-        container:   'mp3',            // MP3: smaller, faster, no partial playback issues
+        container:   'mp3',
         bit_rate:    128000,
         sample_rate: 44100,
       },
     }),
   });
 
-  if (!response.ok) {
-    const errText = await response.text();
-    throw new Error(`[TTS] Cartesia ${response.status}: ${errText}`);
-  }
-
+  if (!response.ok) throw new Error(`Cartesia error: ${response.status}`);
   const buffer = await response.arrayBuffer();
-  const base64  = Buffer.from(buffer).toString('base64');
-  console.log(`[TTS] ✅ Cartesia: ${buffer.byteLength} bytes (MP3) for lang=${cartesiaLang}`);
-  return base64;
+  return Buffer.from(buffer).toString('base64');
 };
 
-module.exports = { synthesizeSpeech, getVoiceId };
+/**
+ * Sarvam Saaras Engine (Indian Languages)
+ */
+const synthesizeWithSarvam = async (text, language) => {
+  const apiKey = process.env.SARVAM_API_KEY;
+  const base = getLangBase(language);
+  const sarvamLang = SARVAM_LANG_MAP[base] || 'hi-IN';
+
+  console.log(`[TTS] Sarvam Saaras | ${sarvamLang} | "${text.substring(0, 40)}..."`);
+
+  const response = await axios.post('https://api.sarvam.ai/v1/text-to-speech', {
+    inputs: [text.trim()],
+    target_language_code: sarvamLang,
+    speaker: 'meera',
+    model: 'saaras:v1',
+    speech_sample_rate: 16000,
+    enable_preprocessing: true,
+  }, {
+    headers: { 'api-subscription-key': apiKey }
+  });
+
+  if (response.data?.audios?.[0]) {
+    return response.data.audios[0]; // Already base64 from Sarvam
+  }
+  throw new Error('Sarvam TTS failed to return audio');
+};
+
+module.exports = { synthesizeSpeech };

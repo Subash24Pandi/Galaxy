@@ -122,11 +122,10 @@ const translateText = async (text, sourceLang, targetLang) => {
         messages: [
           {
             role: 'system',
-            content: `CRITICAL INSTRUCTION: You are a professional translator. 
-- Translate the input text exactly into ${targetName}.
-- DO NOT add any extra information, notes, or creative interpretations.
-- DO NOT mention personal topics like gender or orientation unless explicitly stated in the source.
-- ONLY output the translated text. No quotes. No explanations.`,
+            content: `Translate the input exactly into ${targetName}.
+- DO NOT add any extra meaning, notes, or creative interpretations.
+- DO NOT hallucinate or add personal topics.
+- ONLY output the translated text. No quotes. No reasoning.`,
           },
           {
             role: 'user',

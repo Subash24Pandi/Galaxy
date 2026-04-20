@@ -20,121 +20,117 @@ const translationService = require('../services/translationService');
 const ttsService         = require('../services/ttsService');
 const { saveMessage, createSession } = require('../models/sessionModel');
 
+// ── In-Memory Session Cache for Background Processing ──────────────────────
+const sessionState = new Map();
+
 /**
- * Handle a single audio utterance chunk from a speaker.
- * Emits translated audio + transcript to the session room.
+ * Main Audio Processing Pipeline
+ * Handle background transcription (while speaking) and finalization (on Mic Off).
  */
 const handleAudioUtterance = async (req, res) => {
   const { sessionId, role, clientId, audioBase64, inputLang, outputLang, isFinal } = req.body;
   const io = req.app.get('io');
 
-  // ── Validation ──────────────────────────────────────────────────────────────
   if (!sessionId || !role || !audioBase64) {
-    return res.status(400).json({ 
-      success: false, 
-      message: 'Missing required fields: sessionId, role, audioBase64' 
-    });
-  }
-  if (!inputLang || !outputLang) {
-    return res.status(400).json({ 
-      success: false, 
-      message: 'Missing language config: inputLang, outputLang' 
-    });
+    return res.status(400).json({ success: false, message: 'Missing fields' });
   }
 
   const room       = `session-${sessionId}`;
   const targetRole = role === 'agent' ? 'customer' : 'agent';
-  const startTime  = Date.now();
+  const stateKey   = `${sessionId}-${role}`;
+  
+  if (!sessionState.has(stateKey)) {
+    sessionState.set(stateKey, { processedText: '', audioQueue: [], lastSentIndex: 0 });
+  }
+  const state = sessionState.get(stateKey);
 
-  // Respond immediately so client can capture next chunk (non-blocking UX)
+  // Respond immediately
   res.json({ success: true, message: isFinal ? 'Finalizing...' : 'Transcribing...' });
 
-  console.log(`\n[Pipeline] ▶ ${role.toUpperCase()} (ID: ${clientId}) | session=${sessionId} | ${inputLang} → ${outputLang}`);
-
   try {
-    // Ensure session exists
-    await createSession(sessionId).catch(() => {}); // silent if already exists
+    await createSession(sessionId).catch(() => {});
 
-    // ── STEP 1: STT — ElevenLabs Speech-to-Text ─────────────────────────────
+    // ── STEP 1: STT (Background or Final) ──────────────────────────────────
     const audioBuffer = Buffer.from(audioBase64, 'base64');
-    const originalText = await sttService.transcribeAudio(audioBuffer, inputLang);
+    const fullTranscript = await sttService.transcribeAudio(audioBuffer, inputLang);
 
-    if (!originalText || originalText.trim().length < 1) {
-      console.warn('[Pipeline] STT returned empty — skipping pipeline');
-      return;
-    }
+    if (!fullTranscript || fullTranscript.trim() === '') return;
 
-    // ── STEP 2: Background vs. Final Logic ─────────────────────────────────
-    if (!isFinal) {
-      console.log(`[Pipeline] ⚡ Background STT: "${originalText.substring(0, 40)}..."`);
+    // Find what's new in the transcript
+    const currentText = fullTranscript.trim();
+    const newText = currentText.slice(state.processedText.length).trim();
+
+    if (newText.length > 0) {
+      // ── STEP 2: Incremental Synthesis (Background) ───────────────────────
+      // We look for completed sentences to synthesize in the background
+      const sentences = newText.split(/(?<=[.!?।])\s+/).map(s => s.trim()).filter(s => s.length > 1);
+      
+      // If not final, we only process sentences that are definitely finished (ends with punctuation)
+      const toProcess = isFinal ? sentences : sentences.filter(s => /[.!?।]$/.test(s));
+
+      for (const sentence of toProcess) {
+        try {
+          console.log(`[Pipeline] ⚡ Background Synthesizing: "${sentence}"`);
+          const translated = await translationService.translateText(sentence, inputLang, outputLang);
+          if (translated) {
+            const audio = await ttsService.synthesizeSpeech(translated, outputLang);
+            state.audioQueue.push({ translated, audio });
+            state.processedText += (state.processedText ? ' ' : '') + sentence;
+          }
+        } catch (err) {
+          console.warn('[Pipeline] Background synth error:', err.message);
+        }
+      }
+
+      // Update UI with current transcript
       io.to(room).emit('transcript_update', {
         role,
-        phase:        'transcribing',
-        originalText,
-        translatedText: null,
-        timestamp:    new Date().toISOString(),
+        phase: 'transcribing',
+        originalText: currentText,
+        timestamp: new Date().toISOString(),
       });
-      return;
     }
 
-    // ── STEP 3: Translation — Sarvam AI ─────────────────────────────────────
-    const transStart    = Date.now();
-    const translatedText = await translationService.translateText(originalText, inputLang, outputLang);
-    const transMs = Date.now() - transStart;
-
-    // Safety guard: reject if think tags leaked through OR translation is empty (noise filter)
-    if (!translatedText || translatedText.trim() === '' || translatedText.toLowerCase().includes('<think>')) {
-      console.warn('[Pipeline] Translation empty or invalid (noise filter) — aborting');
-      return;
-    }
-    // Trim translation to max 1000 chars for TTS (prevents truncation for long speech)
-    const ttsText = translatedText.length > 1000
-      ? translatedText.substring(0, 1000).replace(/[,.]?$/, '…')
-      : translatedText;
-
-    console.log(`[Pipeline] Translation ✅ ${transMs}ms: "${ttsText.substring(0, 60)}"`);
-
-    // Update transcript with final translation (one bubble)
-    io.to(room).emit('transcript_update', {
-      role,
-      phase:        'translated',
-      originalText,
-      translatedText,
-      timestamp:    new Date().toISOString(),
-    });
-
-    // ── STEP 4: TTS — Parallel Sentence Synthesis for Ultra-Low Latency ──────
-    const sentences = ttsText
-      .split(/(?<=[.!?।])\s+/)
-      .map(s => s.trim())
-      .filter(s => s.length > 1);
-
-    console.log(`[Pipeline] Parallel TTS for ${sentences.length} sentences...`);
-
-    const ttsPromises = sentences.map(async (sentence, index) => {
-      try {
-        const sentenceAudio = await ttsService.synthesizeSpeech(sentence, outputLang);
-        return { index, sentence, audio: sentenceAudio };
-      } catch (err) {
-        console.error(`[Pipeline] TTS chunk ${index} failed: ${err.message}`);
-        return null;
+    // ── STEP 3: Finalization (On Mic Off) ───────────────────────────────────
+    if (isFinal) {
+      console.log(`[Pipeline] 🔴 FINALIZING session ${sessionId} | Queue size: ${state.audioQueue.length}`);
+      
+      // Process any remaining text that didn't end in punctuation
+      const remaining = currentText.slice(state.processedText.length).trim();
+      if (remaining.length > 0) {
+        try {
+          const translated = await translationService.translateText(remaining, inputLang, outputLang);
+          if (translated) {
+            const audio = await ttsService.synthesizeSpeech(translated, outputLang);
+            state.audioQueue.push({ translated, audio });
+          }
+        } catch (err) { console.warn('[Pipeline] Final bit synth error:', err.message); }
       }
-    });
 
-    for (const promise of ttsPromises) {
-      const result = await promise;
-      if (result && result.audio) {
+      const fullOriginal = currentText;
+      const fullTranslated = state.audioQueue.map(q => q.translated).join(' ');
+
+      // Final UI Update
+      io.to(room).emit('transcript_update', {
+        role,
+        phase: 'translated',
+        originalText: fullOriginal,
+        translatedText: fullTranslated,
+        timestamp: new Date().toISOString(),
+      });
+
+      // Flush ALL buffered audio to the other end immediately
+      for (const item of state.audioQueue) {
         io.to(room).emit('audio_playback', {
           senderRole:  role,
           clientId:    clientId,
           targetRole,
-          audioBase64: result.audio,
+          audioBase64: item.audio,
           format:      'mp3',
           language:    outputLang,
-          translatedText: result.sentence,
+          translatedText: item.translated,
           timestamp:   new Date().toISOString(),
         });
-        console.log(`[Pipeline] Sent TTS chunk ${result.index + 1}/${sentences.length}`);
       }
     }
 

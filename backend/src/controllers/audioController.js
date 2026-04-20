@@ -8,7 +8,7 @@ const processingLocks = new Set();
 
 /**
  * Main Audio Processing Pipeline
- * Optimized for: <3s Total Latency + Overlapping Chunk Support + Fuzzy Duplicate Prevention
+ * Optimized with High-Performance Streaming Prompt + Sub-2s Latency
  */
 const handleAudioUtterance = async (req, res) => {
   const { sessionId, role, clientId, audioBase64, inputLang, outputLang, isFinal } = req.body;
@@ -33,7 +33,7 @@ const handleAudioUtterance = async (req, res) => {
     }
     const state = sessionState.get(stateKey);
 
-    res.json({ success: true, message: 'Processing...' });
+    res.json({ success: true, message: 'Streaming...' });
     const startTime = Date.now();
 
     await createSession(sessionId).catch(() => {});
@@ -44,33 +44,36 @@ const handleAudioUtterance = async (req, res) => {
 
     if (!chunkText || chunkText.trim().length < 2) return;
 
-    // Split chunk into sentences
-    const sentences = chunkText.trim().split(/(?<=[.!?।])\s+/).map(s => s.trim()).filter(s => s.length > 1);
+    // Split chunk into fragments (aggressive streaming)
+    // We split by punctuation but also handle partial fragments if long enough
+    const fragments = chunkText.trim().split(/(?<=[.!?।])\s+/).map(s => s.trim()).filter(s => s.length > 1);
 
-    for (const sentence of sentences) {
+    for (const fragment of fragments) {
       // ── FUZZY DUPLICATE PREVENTION ──
-      // Check if this sentence (or something very similar) was already processed
       const isDuplicate = state.history.some(prev => {
-        const s1 = sentence.toLowerCase().replace(/[^\w]/g, '');
+        const s1 = fragment.toLowerCase().replace(/[^\w]/g, '');
         const s2 = prev.toLowerCase().replace(/[^\w]/g, '');
         return s1 === s2 || s1.includes(s2) || s2.includes(s1);
       });
 
       if (isDuplicate) continue;
 
-      // Only process complete sentences unless it's the final flush
-      const isComplete = /[.!?।]$/.test(sentence);
-      if (!isComplete && !isFinal) continue;
+      // AGGRESSIVE STREAMING: 
+      // If user provided prompt says "handle partial/incomplete", 
+      // we only wait for 3+ words or a final stop.
+      const wordCount = fragment.split(/\s+/).length;
+      const isComplete = /[.!?।]$/.test(fragment);
+      if (!isComplete && !isFinal && wordCount < 4) continue;
 
       try {
-        console.log(`[Pipeline] ⚡ Processing: "${sentence}"`);
-        const translated = await translationService.translateText(sentence, inputLang, outputLang);
+        console.log(`[Pipeline] ⚡ Streaming Fragment: "${fragment}"`);
+        const translated = await translationService.translateText(fragment, inputLang, outputLang);
         
         if (translated && translated.trim().length > 0) {
-          state.history.push(sentence);
+          state.history.push(fragment);
           
           const audio = await ttsService.synthesizeSpeech(translated, outputLang);
-          state.audioQueue.push({ original: sentence, translated, audio });
+          state.audioQueue.push({ original: fragment, translated, audio });
 
           io.to(room).emit('audio_playback', {
             senderRole:  role,
@@ -83,19 +86,17 @@ const handleAudioUtterance = async (req, res) => {
             timestamp:   new Date().toISOString(),
           });
         }
-      } catch (err) { console.warn('[Pipeline] Loop error:', err.message); }
+      } catch (err) { console.warn('[Pipeline] Stream error:', err.message); }
     }
 
-    // Live UI Update (Show unique sentences combined)
-    const displayOriginal = state.history.join(' ');
+    // Live UI Update
     io.to(room).emit('transcript_update', {
       role,
       phase: 'transcribing',
-      originalText: displayOriginal,
+      originalText: state.history.join(' '),
       timestamp: new Date().toISOString(),
     });
 
-    // ── STEP 2: Finalization ───────────────────────────────────────────────
     if (isFinal) {
       console.log(`[Pipeline] 🔴 FINALIZING | session=${sessionId}`);
       

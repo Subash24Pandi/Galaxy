@@ -8,7 +8,7 @@ const LANG_NAMES = {
 
 /**
  * Translate text using Groq (Llama 3.1 8B Instant)
- * Optimized for zero-latency and high-accuracy Indian language support.
+ * Optimized with USER-provided High-Performance System Prompt
  */
 const translateText = async (text, srcLang, tgtLang) => {
   const trimmed = text?.trim();
@@ -20,23 +20,46 @@ const translateText = async (text, srcLang, tgtLang) => {
   const srcName = LANG_NAMES[srcLang.split('-')[0]] || srcLang;
   const targetName = LANG_NAMES[tgtLang.split('-')[0]] || tgtLang;
 
-  console.log(`[Translation] Groq | ${srcName} → ${targetName} | "${trimmed.substring(0, 40)}..."`);
-
   try {
     const response = await axios.post('https://api.groq.com/openai/v1/chat/completions', {
       model: 'llama-3.1-8b-instant',
       messages: [
         {
           role: 'system',
-          content: `You are a professional real-time voice translator. 
-Translate the input from ${srcName} to ${targetName} naturally.
+          content: `You are a real-time speech translation engine.
 
-CRITICAL RULES:
-1. Output ONLY the translated text. DO NOT include the original text or any explanations.
-2. YOU MUST USE THE ${targetName} SCRIPT ONLY.
-3. DO NOT transliterate. (Example: If input is Tamil 'Saptiya?', translate to English 'Have you eaten?', DO NOT write 'Saptiya').
-4. Maintain a colloquial, spoken tone.
-5. If the input is noise or meaningless, return an empty string.`
+TASK:
+Translate the input text from ${srcName} to ${targetName}.
+
+CORE REQUIREMENTS:
+* Preserve the exact meaning of the original sentence.
+* Do NOT omit any information.
+* Do NOT add extra meaning or assumptions.
+* Maintain the original tone (formal/informal, emotion).
+* Keep names, numbers, and entities accurate.
+* If a word has no direct equivalent, choose the closest natural translation.
+
+OUTPUT RULES:
+* Output ONLY the translated text.
+* No explanations, no comments, no formatting.
+* No quotes, no prefixes, no metadata.
+
+LOW LATENCY MODE:
+* Respond immediately.
+* Do NOT use step-by-step reasoning.
+* Do NOT overthink.
+* Keep sentence structure simple but correct.
+* Prefer direct translation, but adjust grammar if needed for correctness.
+
+STREAMING HANDLING:
+* If input is partial or incomplete, translate it as-is.
+* Do not wait for full sentence completion.
+
+QUALITY GUARD:
+* Ensure nothing from the input is missing in the output.
+* Ensure the translation is clear and natural in the target language.
+
+Return only the translated text.`
         },
         {
           role: 'user',
@@ -53,17 +76,10 @@ CRITICAL RULES:
       }
     });
 
-    const translated = response.data.choices[0]?.message?.content?.trim() || '';
-    
-    // Safety check: If the AI returned the exact same text as input, it failed to translate.
-    if (translated.toLowerCase() === trimmed.toLowerCase()) {
-       console.warn('[Translation] ⚠️ AI returned same text. Possible routing error.');
-    }
-
-    return translated;
+    return response.data.choices[0]?.message?.content?.trim() || '';
   } catch (error) {
     console.error(`[Translation] ❌ Error: ${error.response?.data?.error?.message || error.message}`);
-    return trimmed; // Fallback
+    return trimmed; 
   }
 };
 

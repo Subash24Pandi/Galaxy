@@ -1,3 +1,8 @@
+const sttService         = require('../services/sttService');
+const translationService = require('../services/translationService');
+const ttsService         = require('../services/ttsService');
+const { saveMessage, createSession } = require('../models/sessionModel');
+
 // ── In-Memory Session Cache for Background Processing ──────────────────────
 const sessionState = new Map();
 

@@ -1,166 +1,78 @@
 /**
- * Translation Service — Sarvam AI ONLY (STRICT: no ElevenLabs, no OpenAI)
- *
- * Primary:  Sarvam NMT  /translate  (fast, neural machine translation)
- * Fallback: Sarvam LLM  /v1/chat/completions  (if NMT fails)
- *
- * Mode: modern-colloquial — spoken, casual, NOT formal
+ * Translation Service — Groq AI (Llama 3.3 70B)
+ * 
+ * Used for ultra-low latency, high-accuracy translation.
  */
 
-const LANGUAGE_NAMES = {
-  'en-IN':  'English',
-  'hi-IN':  'Hindi',
-  'ta-IN':  'Tamil',
-  'te-IN':  'Telugu',
-  'kn-IN':  'Kannada',
-  'bn-IN':  'Bengali',
-  'gu-IN':  'Gujarati',
-  'mr-IN':  'Marathi',
-  'ml-IN':  'Malayalam',
-  'or-IN':  'Odiya',
-  'as-IN':  'Assamese',
-  'bho-IN': 'Bhojpuri',
-};
+const axios = require('axios');
 
-// Normalize language code to Sarvam format (xx-IN)
-const toSarvamCode = (lang) => {
-  if (!lang) return 'en-IN';
-  if (lang.includes('-IN')) return lang;
-  return `${lang}-IN`;
+const LANG_NAMES = {
+  'en': 'English', 'hi': 'Hindi', 'ta': 'Tamil', 'te': 'Telugu',
+  'kn': 'Kannada', 'ml': 'Malayalam', 'bn': 'Bengali', 'gu': 'Gujarati',
+  'mr': 'Marathi', 'or': 'Odiya', 'as': 'Assamese', 'bho': 'Bhojpuri'
 };
 
 /**
- * Strip <think>...</think> reasoning blocks from LLM output.
- * Sarvam-m is a reasoning model — it outputs CoT before the answer.
+ * Translate text using Groq Llama 3.3 70B
+ * @param {string} text     - Input text
+ * @param {string} srcLang  - Source language code
+ * @param {string} tgtLang  - Target language code
+ * @returns {Promise<string>} Translated text
  */
-const stripThinkTags = (text) => {
-  if (!text) return text;
-  // Remove full <think>...</think> blocks (including multiline)
-  return text
-    .replace(/<think>[\s\S]*?<\/think>/gi, '')
-    .replace(/<think>[\s\S]*/gi, '')   // unclosed think tag
-    .trim()
-    .replace(/^["""'']|["""'']$/g, '')  // strip surrounding quotes
-    .trim();
-};
-
-/**
- * Translate text from sourceLang → targetLang using Sarvam AI.
- * @param {string} text       - Source text (from STT)
- * @param {string} sourceLang - e.g. 'ta', 'hi-IN'
- * @param {string} targetLang - e.g. 'en', 'te-IN'
- * @returns {Promise<string>} - Translated colloquial text
- */
-const translateText = async (text, sourceLang, targetLang) => {
-  const apiKey = process.env.SARVAM_API_KEY;
-  if (!apiKey) throw new Error('[Translation] SARVAM_API_KEY missing');
-
+const translateText = async (text, srcLang, tgtLang) => {
   const trimmed = text?.trim();
-  if (!trimmed) return text;
+  if (!trimmed) return '';
 
-  const src = toSarvamCode(sourceLang);
-  const tgt = toSarvamCode(targetLang);
+  const apiKey = process.env.GROQ_API_KEY;
+  if (!apiKey) throw new Error('[Translation] GROQ_API_KEY missing');
 
-  // Skip if same language
-  if (src === tgt) {
-    console.log(`[Translation] Same language (${src}) — skipping`);
-    return trimmed;
-  }
+  const targetName = LANG_NAMES[tgtLang.split('-')[0]] || tgtLang;
 
-  const targetName = LANGUAGE_NAMES[tgt] || tgt;
-  console.log(`[Translation] ${src} → ${tgt}: "${trimmed.substring(0, 50)}..."`);
+  console.log(`[Translation] Groq (Llama 3.3 70B) | ${srcLang} → ${tgtLang} | "${trimmed.substring(0, 40)}..."`);
 
-  // ── STEP 1: Sarvam NMT (Primary — fast neural translation) ──────────────────
   try {
-    const nmtCtrl  = new AbortController();
-    const nmtTimer = setTimeout(() => nmtCtrl.abort(), 6000); // 6s cap — fail fast
-    const nmtRes = await fetch('https://api.sarvam.ai/translate', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'api-subscription-key': apiKey,
-      },
-      body: JSON.stringify({
-        input:                trimmed,
-        source_language_code: src,
-        target_language_code: tgt,
-        mode:                 'formal',        // Use formal for higher precision as requested
-        enable_preprocessing: true,
-      }),
-      signal: nmtCtrl.signal,
-    });
-    clearTimeout(nmtTimer);
-
-    if (nmtRes.ok) {
-      const nmtData = await nmtRes.json();
-      if (nmtData.translated_text) {
-        const result = nmtData.translated_text.trim();
-        if (result) {
-          console.log(`[Translation] NMT ✅ "${result.substring(0, 60)}"`);
-          return result;
+    const startTime = Date.now();
+    const response = await axios.post('https://api.groq.com/openai/v1/chat/completions', {
+      model: 'llama-3.3-70b-versatile',
+      messages: [
+        {
+          role: 'system',
+          content: `Translate the input text exactly into ${targetName}.
+- DO NOT add any extra information, notes, or explanations.
+- DO NOT hallucinate or change the meaning.
+- Maintain a natural, spoken tone.
+- Output ONLY the translated text. No quotes. No conversational filler.`
+        },
+        {
+          role: 'user',
+          content: trimmed
         }
-      }
-    }
-  } catch (err) {
-    console.warn('[Translation] NMT error:', err.message);
-  }
-
-  // ── STEP 2: Sarvam LLM Fallback (sarvam-m) ──────────────────────────────────
-  // Note: we use a strict prompt to prevent model hallucinations
-  console.log(`[Translation] NMT failed → LLM fallback for ${targetName}`);
-  try {
-    const llmCtrl  = new AbortController();
-    const llmTimer = setTimeout(() => llmCtrl.abort(), 10000); // 10s cap
-    const llmRes = await fetch('https://api.sarvam.ai/v1/chat/completions', {
-      method: 'POST',
+      ],
+      temperature: 0.1, // Low temperature for high accuracy
+      max_tokens: 1024,
+      stream: false
+    }, {
       headers: {
-        'Content-Type': 'application/json',
-        'api-subscription-key': apiKey,
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type': 'application/json'
       },
-      body: JSON.stringify({
-        model: 'sarvam-m',
-        messages: [
-          {
-            role: 'system',
-            content: `Translate the input exactly into ${targetName}.
-- DO NOT add any extra meaning, notes, or creative interpretations.
-- DO NOT hallucinate or add personal topics.
-- ONLY output the translated text. No quotes. No reasoning.`,
-          },
-          {
-            role: 'user',
-            content: trimmed,
-          },
-        ],
-        temperature: 0.01, // Near-zero for maximum accuracy
-        max_tokens:  400,
-      }),
-      signal: llmCtrl.signal,
+      timeout: 5000 // Groq is fast, 5s is plenty
     });
-    clearTimeout(llmTimer);
 
-    if (llmRes.ok) {
-      const llmData = await llmRes.json();
-      const raw = llmData.choices?.[0]?.message?.content;
-      if (raw) {
-        // CRITICAL: strip <think>...</think> reasoning blocks before using
-        const cleaned = stripThinkTags(raw);
-        if (cleaned) {
-          console.log(`[Translation] LLM ✅ "${cleaned.substring(0, 60)}"`);
-          return cleaned;
-        }
-      }
-    } else {
-      const errBody = await llmRes.text();
-      console.warn(`[Translation] LLM HTTP ${llmRes.status}: ${errBody.substring(0, 200)}`);
+    const translated = response.data?.choices?.[0]?.message?.content?.trim();
+    const duration = Date.now() - startTime;
+
+    if (translated) {
+      console.log(`[Translation] ✅ Groq (${duration}ms): "${translated.substring(0, 60)}..."`);
+      return translated;
     }
-  } catch (err) {
-    console.warn('[Translation] LLM error:', err.message);
-  }
+    throw new Error('Empty response from Groq');
 
-  // ── Last resort: return original ────────────────────────────────────────────
-  console.error('[Translation] All engines failed — returning original');
-  return trimmed;
+  } catch (err) {
+    console.error(`[Translation] Groq failed: ${err.message}`);
+    // No fallback to Sarvam NMT to ensure maximum speed and consistency
+    throw err;
+  }
 };
 
 module.exports = { translateText };

@@ -266,15 +266,25 @@ const ActiveCall = () => {
       }
     };
 
-    // Play incoming audio (play if it's from the OTHER person)
-    socket.on('audio_playback', (data) => {
-      // Use clientId for perfect loop prevention (better than role check)
-      if (data.clientId === clientIdRef.current) return; 
-      if (!data.audioBase64) return;
+    const playbackBufferRef = { current: [] };
 
-      // Push to queue and trigger playback
-      audioQueueRef.current.push(data.audioBase64);
-      playNextInQueue();
+    socket.on('audio_playback', (data) => {
+      if (data.clientId === clientIdRef.current) return;
+      if (!data.audioBase64) return;
+      if (data.bufferOnly) {
+        playbackBufferRef.current.push(data.audioBase64);
+      } else {
+        audioQueueRef.current.push(data.audioBase64);
+        playNextInQueue();
+      }
+    });
+
+    socket.on('audio_command', (data) => {
+      if (data.command === 'START_PLAYBACK' && data.senderRole !== role) {
+        audioQueueRef.current.push(...playbackBufferRef.current);
+        playbackBufferRef.current = [];
+        playNextInQueue();
+      }
     });
 
     return () => {
@@ -426,14 +436,14 @@ const ActiveCall = () => {
               const duration = Date.now() - (recordingStartRef.current || Date.now());
               const timeSinceLastStream = Date.now() - lastStreamSentRef.current;
 
-              // ── BACKGROUND STREAMING: Send partial chunks every 2s for zero-latency ──
+              // ── BACKGROUND STREAMING: Send full buffer for maximum context ──
               if (timeSinceLastStream > STREAM_INTERVAL_MS) {
                 lastStreamSentRef.current = Date.now();
                 const buf = [...pcmDataRef.current];
-                // Note: we don't clear pcmDataRef here because Sarvam REST needs full context
+                
                 if (buf.length > 1000) {
-                  console.log(`[VAD] ⚡ Background streaming (${buf.length} samples)`);
-                  sendChunk(buf, false); // isFinal = false
+                  console.log(`[VAD] ⚡ Background streaming context (${buf.length} samples)`);
+                  sendChunk(buf, false); 
                 }
               }
 
@@ -442,7 +452,7 @@ const ActiveCall = () => {
                 isRecordingRef.current    = false;
                 recordingStartRef.current = null;
                 const buf = [...pcmDataRef.current];
-                pcmDataRef.current = [];
+                pcmDataRef.current = []; // Clear only on hard split
                 if (buf.length > 0) sendChunk(buf, true);
               }
 

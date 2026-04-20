@@ -4,11 +4,11 @@ const ttsService         = require('../services/ttsService');
 const { saveMessage, createSession } = require('../models/sessionModel');
 
 const sessionState = new Map();
-const processingLocks = new Set(); // Concurrency lock to prevent duplicate sentences
+const processingLocks = new Set(); 
 
 /**
  * Main Audio Processing Pipeline
- * Handles background transcription and finalization with concurrency protection.
+ * Optimized for "No Splitting" + "Full Context" + "Instant Mic Off Playback"
  */
 const handleAudioUtterance = async (req, res) => {
   const { sessionId, role, clientId, audioBase64, inputLang, outputLang, isFinal } = req.body;
@@ -22,8 +22,6 @@ const handleAudioUtterance = async (req, res) => {
   const targetRole = role === 'agent' ? 'customer' : 'agent';
   const stateKey   = `${sessionId}-${role}`;
   
-  // ── CONCURRENCY LOCK ──
-  // Wait if this session/role is already being processed to avoid race conditions
   while (processingLocks.has(stateKey)) {
     await new Promise(resolve => setTimeout(resolve, 50));
   }
@@ -35,7 +33,6 @@ const handleAudioUtterance = async (req, res) => {
     }
     const state = sessionState.get(stateKey);
 
-    // Respond immediately
     res.json({ success: true, message: isFinal ? 'Finalizing...' : 'Transcribing...' });
     const startTime = Date.now();
 
@@ -47,33 +44,47 @@ const handleAudioUtterance = async (req, res) => {
 
     if (!fullTranscript || fullTranscript.trim() === '') return;
 
-    // Find what's new in the transcript
+    // Find NEW text by stripping what we already processed
     const currentText = fullTranscript.trim();
     const newText = currentText.slice(state.processedText.length).trim();
 
     if (newText.length > 0) {
       // ── STEP 2: Incremental Synthesis ────────────────────────────────────
       const sentences = newText.split(/(?<=[.!?।])\s+/).map(s => s.trim()).filter(s => s.length > 1);
+      
+      // Background mode: only process sentences that end in punctuation
+      // Final mode: process EVERYTHING remaining
       const toProcess = isFinal ? sentences : sentences.filter(s => /[.!?।]$/.test(s));
 
       for (const sentence of toProcess) {
         try {
-          // Double-check processedText to prevent duplicates
-          if (state.processedText.toLowerCase().includes(sentence.toLowerCase())) continue;
+          // Double-check to avoid reprocessing if Sarvam slightly changed the previous text
+          if (state.processedText.includes(sentence)) continue;
 
-          console.log(`[Pipeline] ⚡ Processing: "${sentence}"`);
+          console.log(`[Pipeline] ⚡ Pre-synthesizing: "${sentence}"`);
           const translated = await translationService.translateText(sentence, inputLang, outputLang);
           if (translated) {
             const audio = await ttsService.synthesizeSpeech(translated, outputLang);
             state.audioQueue.push({ translated, audio });
             state.processedText += (state.processedText ? ' ' : '') + sentence;
+
+            // Emit to client for buffering
+            io.to(room).emit('audio_playback', {
+              senderRole:  role,
+              clientId:    clientId,
+              targetRole,
+              audioBase64: audio,
+              format:      'mp3',
+              language:    outputLang,
+              translatedText: translated,
+              bufferOnly:  true,
+              timestamp:   new Date().toISOString(),
+            });
           }
-        } catch (err) {
-          console.warn('[Pipeline] Synth error:', err.message);
-        }
+        } catch (err) { console.warn('[Pipeline] Synth error:', err.message); }
       }
 
-      // Update UI with growing transcript
+      // Update UI (Single growing bubble)
       io.to(room).emit('transcript_update', {
         role,
         phase: 'transcribing',
@@ -82,9 +93,9 @@ const handleAudioUtterance = async (req, res) => {
       });
     }
 
-    // ── STEP 3: Finalization (On Mic Off) ───────────────────────────────────
+    // ── STEP 3: Finalization ───────────────────────────────────────────────
     if (isFinal) {
-      console.log(`[Pipeline] 🔴 FINALIZING | session=${sessionId} | Queue=${state.audioQueue.length}`);
+      console.log(`[Pipeline] 🔴 FINALIZING | session=${sessionId}`);
       
       const remaining = currentText.slice(state.processedText.length).trim();
       if (remaining.length > 0) {
@@ -93,45 +104,42 @@ const handleAudioUtterance = async (req, res) => {
           if (translated) {
             const audio = await ttsService.synthesizeSpeech(translated, outputLang);
             state.audioQueue.push({ translated, audio });
-            state.processedText += (state.processedText ? ' ' : '') + remaining;
+            
+            io.to(room).emit('audio_playback', {
+              senderRole:  role,
+              clientId:    clientId,
+              targetRole,
+              audioBase64: audio,
+              format:      'mp3',
+              language:    outputLang,
+              translatedText: translated,
+              bufferOnly:  false, // Play immediately
+              timestamp:   new Date().toISOString(),
+            });
           }
         } catch (err) { console.warn('[Pipeline] Final bit error:', err.message); }
       }
 
-      const fullOriginal = currentText;
-      const fullTranslated = state.audioQueue.map(q => q.translated).join(' ');
+      // Start the buffered audio immediately
+      io.to(room).emit('audio_command', { command: 'START_PLAYBACK', senderRole: role });
 
       // Final UI Update
       io.to(room).emit('transcript_update', {
         role,
         phase: 'translated',
-        originalText: fullOriginal,
-        translatedText: fullTranslated,
+        originalText: currentText,
+        translatedText: state.audioQueue.map(q => q.translated).join(' '),
         timestamp: new Date().toISOString(),
       });
-
-      // Flush all buffered audio
-      for (const item of state.audioQueue) {
-        io.to(room).emit('audio_playback', {
-          senderRole:  role,
-          clientId:    clientId,
-          targetRole,
-          audioBase64: item.audio,
-          format:      'mp3',
-          language:    outputLang,
-          translatedText: item.translated,
-          timestamp:   new Date().toISOString(),
-        });
-      }
 
       sessionState.delete(stateKey);
 
       saveMessage({
         sessionId,
         senderRole: role,
-        originalText: fullOriginal,
+        originalText: currentText,
+        translatedText: state.audioQueue.map(q => q.translated).join(' '),
         originalLang: inputLang,
-        translatedText: fullTranslated,
         translatedLang: outputLang,
       }).catch(() => {});
 

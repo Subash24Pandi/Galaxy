@@ -1,25 +1,3 @@
-/**
- * Audio Controller — Real-time STT → Translate → TTS streaming pipeline
- * 
- * Architecture:
- *  1. Receive audio chunk (base64 WAV) from client via HTTP POST
- *  2. ElevenLabs STT → transcript
- *  3. Sarvam NMT → translation (colloquial)
- *  4. ElevenLabs TTS → synthesized audio (base64)
- *  5. Push transcript + audio to the correct peer via Socket.io
- * 
- * The pipeline is STT→Translate→TTS all within one request.
- * Low latency is achieved by:
- *   - Fast VAD chunking on the client (1-2s chunks)
- *   - Immediate parallel STT + translation (where possible)
- *   - ElevenLabs optimize_streaming_latency=4
- */
-
-const sttService         = require('../services/sttService');
-const translationService = require('../services/translationService');
-const ttsService         = require('../services/ttsService');
-const { saveMessage, createSession } = require('../models/sessionModel');
-
 // ── In-Memory Session Cache for Background Processing ──────────────────────
 const sessionState = new Map();
 
@@ -46,6 +24,7 @@ const handleAudioUtterance = async (req, res) => {
 
   // Respond immediately
   res.json({ success: true, message: isFinal ? 'Finalizing...' : 'Transcribing...' });
+  const startTime = Date.now();
 
   try {
     await createSession(sessionId).catch(() => {});
@@ -70,6 +49,9 @@ const handleAudioUtterance = async (req, res) => {
 
       for (const sentence of toProcess) {
         try {
+          // Avoid double-processing the exact same sentence
+          if (state.processedText.includes(sentence)) continue;
+
           console.log(`[Pipeline] ⚡ Background Synthesizing: "${sentence}"`);
           const translated = await translationService.translateText(sentence, inputLang, outputLang);
           if (translated) {
@@ -103,6 +85,7 @@ const handleAudioUtterance = async (req, res) => {
           if (translated) {
             const audio = await ttsService.synthesizeSpeech(translated, outputLang);
             state.audioQueue.push({ translated, audio });
+            state.processedText += (state.processedText ? ' ' : '') + remaining;
           }
         } catch (err) { console.warn('[Pipeline] Final bit synth error:', err.message); }
       }
@@ -132,34 +115,24 @@ const handleAudioUtterance = async (req, res) => {
           timestamp:   new Date().toISOString(),
         });
       }
+
+      // Clear state for next turn
+      sessionState.delete(stateKey);
+
+      // Persist to DB
+      saveMessage({
+        sessionId,
+        senderRole: role,
+        originalText: fullOriginal,
+        originalLang: inputLang,
+        translatedText: fullTranslated,
+        translatedLang: outputLang,
+      }).catch(() => {});
+
+      console.log(`[Pipeline] ✅ Complete in ${Date.now() - startTime}ms`);
     }
-
-    console.log(`[Pipeline] ✅ All chunks sent | total=${Date.now() - startTime}ms`);
-
-    // ── STEP 5: Persist to DB (non-blocking) ────────────────────────────────
-    saveMessage({
-      sessionId,
-      senderRole:     role,
-      originalText,
-      originalLang:   inputLang,
-      translatedText,
-      translatedLang: outputLang,
-    }).catch(dbErr => console.warn('[Pipeline] DB persist failed:', dbErr.message));
 
   } catch (error) {
-    const isSilent = error.message.startsWith('SILENT:');
-    const displayMsg = error.message.replace('SILENT:', '').trim();
-
-    if (isSilent) {
-      console.log(`[Pipeline] (Quiet Skip) ${displayMsg}`);
-    } else {
-      console.error(`[Pipeline] ❌ Error: ${error.message}`);
-      io.to(room).emit('session_status', {
-        message: `⚠️ Pipeline error: ${displayMsg.replace('[STT]', '').replace('[TTS]', '').replace('[Translation]', '').trim()}`,
-        type: 'error',
-      });
-    }
+    console.error(`[Pipeline] ❌ Error (${Date.now() - startTime}ms): ${error.message}`);
   }
 };
-
-module.exports = { handleAudioUtterance };

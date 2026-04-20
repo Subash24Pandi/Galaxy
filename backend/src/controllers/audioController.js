@@ -136,3 +136,5 @@ const handleAudioUtterance = async (req, res) => {
     console.error(`[Pipeline] ❌ Error (${Date.now() - startTime}ms): ${error.message}`);
   }
 };
+
+module.exports = { handleAudioUtterance };

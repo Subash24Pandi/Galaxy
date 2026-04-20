@@ -3,12 +3,12 @@ const translationService = require('../services/translationService');
 const ttsService         = require('../services/ttsService');
 const { saveMessage, createSession } = require('../models/sessionModel');
 
-// ── In-Memory Session Cache for Background Processing ──────────────────────
 const sessionState = new Map();
+const processingLocks = new Set(); // Concurrency lock to prevent duplicate sentences
 
 /**
  * Main Audio Processing Pipeline
- * Handle background transcription (while speaking) and finalization (on Mic Off).
+ * Handles background transcription and finalization with concurrency protection.
  */
 const handleAudioUtterance = async (req, res) => {
   const { sessionId, role, clientId, audioBase64, inputLang, outputLang, isFinal } = req.body;
@@ -22,19 +22,26 @@ const handleAudioUtterance = async (req, res) => {
   const targetRole = role === 'agent' ? 'customer' : 'agent';
   const stateKey   = `${sessionId}-${role}`;
   
-  if (!sessionState.has(stateKey)) {
-    sessionState.set(stateKey, { processedText: '', audioQueue: [], lastSentIndex: 0 });
+  // ── CONCURRENCY LOCK ──
+  // Wait if this session/role is already being processed to avoid race conditions
+  while (processingLocks.has(stateKey)) {
+    await new Promise(resolve => setTimeout(resolve, 50));
   }
-  const state = sessionState.get(stateKey);
-
-  // Respond immediately
-  res.json({ success: true, message: isFinal ? 'Finalizing...' : 'Transcribing...' });
-  const startTime = Date.now();
+  processingLocks.add(stateKey);
 
   try {
+    if (!sessionState.has(stateKey)) {
+      sessionState.set(stateKey, { processedText: '', audioQueue: [] });
+    }
+    const state = sessionState.get(stateKey);
+
+    // Respond immediately
+    res.json({ success: true, message: isFinal ? 'Finalizing...' : 'Transcribing...' });
+    const startTime = Date.now();
+
     await createSession(sessionId).catch(() => {});
 
-    // ── STEP 1: STT (Background or Final) ──────────────────────────────────
+    // ── STEP 1: STT ──────────────────────────────────────────────────────────
     const audioBuffer = Buffer.from(audioBase64, 'base64');
     const fullTranscript = await sttService.transcribeAudio(audioBuffer, inputLang);
 
@@ -45,19 +52,16 @@ const handleAudioUtterance = async (req, res) => {
     const newText = currentText.slice(state.processedText.length).trim();
 
     if (newText.length > 0) {
-      // ── STEP 2: Incremental Synthesis (Background) ───────────────────────
-      // We look for completed sentences to synthesize in the background
+      // ── STEP 2: Incremental Synthesis ────────────────────────────────────
       const sentences = newText.split(/(?<=[.!?।])\s+/).map(s => s.trim()).filter(s => s.length > 1);
-      
-      // If not final, we only process sentences that are definitely finished (ends with punctuation)
       const toProcess = isFinal ? sentences : sentences.filter(s => /[.!?।]$/.test(s));
 
       for (const sentence of toProcess) {
         try {
-          // Avoid double-processing the exact same sentence
-          if (state.processedText.includes(sentence)) continue;
+          // Double-check processedText to prevent duplicates
+          if (state.processedText.toLowerCase().includes(sentence.toLowerCase())) continue;
 
-          console.log(`[Pipeline] ⚡ Background Synthesizing: "${sentence}"`);
+          console.log(`[Pipeline] ⚡ Processing: "${sentence}"`);
           const translated = await translationService.translateText(sentence, inputLang, outputLang);
           if (translated) {
             const audio = await ttsService.synthesizeSpeech(translated, outputLang);
@@ -65,11 +69,11 @@ const handleAudioUtterance = async (req, res) => {
             state.processedText += (state.processedText ? ' ' : '') + sentence;
           }
         } catch (err) {
-          console.warn('[Pipeline] Background synth error:', err.message);
+          console.warn('[Pipeline] Synth error:', err.message);
         }
       }
 
-      // Update UI with current transcript
+      // Update UI with growing transcript
       io.to(room).emit('transcript_update', {
         role,
         phase: 'transcribing',
@@ -80,9 +84,8 @@ const handleAudioUtterance = async (req, res) => {
 
     // ── STEP 3: Finalization (On Mic Off) ───────────────────────────────────
     if (isFinal) {
-      console.log(`[Pipeline] 🔴 FINALIZING session ${sessionId} | Queue size: ${state.audioQueue.length}`);
+      console.log(`[Pipeline] 🔴 FINALIZING | session=${sessionId} | Queue=${state.audioQueue.length}`);
       
-      // Process any remaining text that didn't end in punctuation
       const remaining = currentText.slice(state.processedText.length).trim();
       if (remaining.length > 0) {
         try {
@@ -92,7 +95,7 @@ const handleAudioUtterance = async (req, res) => {
             state.audioQueue.push({ translated, audio });
             state.processedText += (state.processedText ? ' ' : '') + remaining;
           }
-        } catch (err) { console.warn('[Pipeline] Final bit synth error:', err.message); }
+        } catch (err) { console.warn('[Pipeline] Final bit error:', err.message); }
       }
 
       const fullOriginal = currentText;
@@ -107,7 +110,7 @@ const handleAudioUtterance = async (req, res) => {
         timestamp: new Date().toISOString(),
       });
 
-      // Flush ALL buffered audio to the other end immediately
+      // Flush all buffered audio
       for (const item of state.audioQueue) {
         io.to(room).emit('audio_playback', {
           senderRole:  role,
@@ -121,10 +124,8 @@ const handleAudioUtterance = async (req, res) => {
         });
       }
 
-      // Clear state for next turn
       sessionState.delete(stateKey);
 
-      // Persist to DB
       saveMessage({
         sessionId,
         senderRole: role,
@@ -138,7 +139,9 @@ const handleAudioUtterance = async (req, res) => {
     }
 
   } catch (error) {
-    console.error(`[Pipeline] ❌ Error (${Date.now() - startTime}ms): ${error.message}`);
+    console.error(`[Pipeline] ❌ Fatal Error: ${error.message}`);
+  } finally {
+    processingLocks.delete(stateKey);
   }
 };
 

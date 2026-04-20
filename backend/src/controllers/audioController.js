@@ -6,9 +6,12 @@ const { saveMessage, createSession } = require('../models/sessionModel');
 const sessionState = new Map();
 const processingLocks = new Set(); 
 
+// ── NEW: Robust Duplicate Prevention ──
+// Stores hashes of "processed sentences" per session to prevent ANY double-translation.
+const processedSentences = new Set(); 
+
 /**
  * Main Audio Processing Pipeline
- * Optimized for: Sub-1s Latency + Mobile Compatibility + Real-time Streaming
  */
 const handleAudioUtterance = async (req, res) => {
   const { sessionId, role, clientId, audioBase64, inputLang, outputLang, isFinal } = req.body;
@@ -50,22 +53,25 @@ const handleAudioUtterance = async (req, res) => {
     if (newText.length > 0) {
       // ── STEP 2: Real-time Synthesis ────────────────────────────────────
       const sentences = newText.split(/(?<=[.!?।])\s+/).map(s => s.trim()).filter(s => s.length > 1);
-      
-      // Process sentences as they are detected (No more bufferOnly=true)
       const toProcess = isFinal ? sentences : sentences.filter(s => /[.!?।]$/.test(s));
 
       for (const sentence of toProcess) {
         try {
-          if (state.processedText.includes(sentence)) continue;
+          // ── FINGERPRINT CHECK (Strict Duplicate Prevention) ──
+          const fingerprint = `${sessionId}-${role}-${sentence.toLowerCase().replace(/\s/g, '')}`;
+          if (processedSentences.has(fingerprint)) continue;
 
           console.log(`[Pipeline] ⚡ Real-time Synthesis: "${sentence}"`);
           const translated = await translationService.translateText(sentence, inputLang, outputLang);
-          if (translated) {
+          
+          if (translated && translated.trim().length > 0) {
+            // Mark as processed BEFORE async synthesis to lock it
+            processedSentences.add(fingerprint);
+            
             const audio = await ttsService.synthesizeSpeech(translated, outputLang);
             state.audioQueue.push({ translated, audio });
             state.processedText += (state.processedText ? ' ' : '') + sentence;
 
-            // Emit to client for IMMEDIATE playback (Fastest possible delivery)
             io.to(room).emit('audio_playback', {
               senderRole:  role,
               clientId:    clientId,
@@ -80,7 +86,6 @@ const handleAudioUtterance = async (req, res) => {
         } catch (err) { console.warn('[Pipeline] Synth error:', err.message); }
       }
 
-      // Live transcript update
       io.to(room).emit('transcript_update', {
         role,
         phase: 'transcribing',
@@ -89,15 +94,17 @@ const handleAudioUtterance = async (req, res) => {
       });
     }
 
-    // ── STEP 3: Finalization ───────────────────────────────────────────────
     if (isFinal) {
       console.log(`[Pipeline] 🔴 FINALIZING | session=${sessionId}`);
       
       const remaining = currentText.slice(state.processedText.length).trim();
-      if (remaining.length > 0) {
+      const fingerprintRem = `${sessionId}-${role}-${remaining.toLowerCase().replace(/\s/g, '')}`;
+
+      if (remaining.length > 0 && !processedSentences.has(fingerprintRem)) {
         try {
           const translated = await translationService.translateText(remaining, inputLang, outputLang);
           if (translated) {
+            processedSentences.add(fingerprintRem);
             const audio = await ttsService.synthesizeSpeech(translated, outputLang);
             state.audioQueue.push({ translated, audio });
             
@@ -115,7 +122,6 @@ const handleAudioUtterance = async (req, res) => {
         } catch (err) { console.warn('[Pipeline] Final bit error:', err.message); }
       }
 
-      // Final UI Update
       io.to(room).emit('transcript_update', {
         role,
         phase: 'translated',
@@ -125,6 +131,10 @@ const handleAudioUtterance = async (req, res) => {
       });
 
       sessionState.delete(stateKey);
+      
+      // Cleanup fingerprints for this session after it completes
+      // (Optional, keep for history if needed, or clear to save memory)
+      // Array.from(processedSentences).filter(f => f.startsWith(sessionId)).forEach(f => processedSentences.delete(f));
 
       saveMessage({
         sessionId,

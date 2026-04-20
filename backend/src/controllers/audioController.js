@@ -25,7 +25,7 @@ const { saveMessage, createSession } = require('../models/sessionModel');
  * Emits translated audio + transcript to the session room.
  */
 const handleAudioUtterance = async (req, res) => {
-  const { sessionId, role, clientId, audioBase64, inputLang, outputLang } = req.body;
+  const { sessionId, role, clientId, audioBase64, inputLang, outputLang, isFinal } = req.body;
   const io = req.app.get('io');
 
   // ── Validation ──────────────────────────────────────────────────────────────
@@ -47,7 +47,7 @@ const handleAudioUtterance = async (req, res) => {
   const startTime  = Date.now();
 
   // Respond immediately so client can capture next chunk (non-blocking UX)
-  res.json({ success: true, message: 'Processing audio chunk...' });
+  res.json({ success: true, message: isFinal ? 'Finalizing...' : 'Transcribing...' });
 
   console.log(`\n[Pipeline] ▶ ${role.toUpperCase()} (ID: ${clientId}) | session=${sessionId} | ${inputLang} → ${outputLang}`);
 
@@ -56,29 +56,28 @@ const handleAudioUtterance = async (req, res) => {
     await createSession(sessionId).catch(() => {}); // silent if already exists
 
     // ── STEP 1: STT — ElevenLabs Speech-to-Text ─────────────────────────────
-    const sttStart   = Date.now();
     const audioBuffer = Buffer.from(audioBase64, 'base64');
     const originalText = await sttService.transcribeAudio(audioBuffer, inputLang);
-    const sttMs = Date.now() - sttStart;
-    
-    console.log(`[Pipeline] STT ✅ ${sttMs}ms: "${originalText.substring(0, 60)}"`);
 
     if (!originalText || originalText.trim().length < 1) {
       console.warn('[Pipeline] STT returned empty — skipping pipeline');
-      io.to(room).emit('session_status', { message: 'Could not understand audio. Try again.' });
       return;
     }
 
-    // Emit immediate transcript feedback (speaker sees their own text right away)
-    io.to(room).emit('transcript_update', {
-      role,
-      phase:        'transcribing',
-      originalText,
-      translatedText: null,
-      timestamp:    new Date().toISOString(),
-    });
+    // ── STEP 2: Background vs. Final Logic ─────────────────────────────────
+    if (!isFinal) {
+      console.log(`[Pipeline] ⚡ Background STT: "${originalText.substring(0, 40)}..."`);
+      io.to(room).emit('transcript_update', {
+        role,
+        phase:        'transcribing',
+        originalText,
+        translatedText: null,
+        timestamp:    new Date().toISOString(),
+      });
+      return;
+    }
 
-    // ── STEP 2: Translation — Sarvam AI ─────────────────────────────────────
+    // ── STEP 3: Translation — Sarvam AI ─────────────────────────────────────
     const transStart    = Date.now();
     const translatedText = await translationService.translateText(originalText, inputLang, outputLang);
     const transMs = Date.now() - transStart;
@@ -104,7 +103,7 @@ const handleAudioUtterance = async (req, res) => {
       timestamp:    new Date().toISOString(),
     });
 
-    // ── STEP 3: TTS — Parallel Sentence Synthesis for Ultra-Low Latency ──────
+    // ── STEP 4: TTS — Parallel Sentence Synthesis for Ultra-Low Latency ──────
     const sentences = ttsText
       .split(/(?<=[.!?।])\s+/)
       .map(s => s.trim())
@@ -112,7 +111,6 @@ const handleAudioUtterance = async (req, res) => {
 
     console.log(`[Pipeline] Parallel TTS for ${sentences.length} sentences...`);
 
-    // We start all TTS calls in parallel but wait for them in order to maintain flow
     const ttsPromises = sentences.map(async (sentence, index) => {
       try {
         const sentenceAudio = await ttsService.synthesizeSpeech(sentence, outputLang);
@@ -123,8 +121,6 @@ const handleAudioUtterance = async (req, res) => {
       }
     });
 
-    // Resolve and emit in order (First-Ready-First-Sent optimization is possible but harder)
-    // Here we wait for all to start, but we can emit as soon as the 'next' one is ready.
     for (const promise of ttsPromises) {
       const result = await promise;
       if (result && result.audio) {

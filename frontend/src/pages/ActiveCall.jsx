@@ -27,12 +27,12 @@ import {
 const SOCKET_URL  = import.meta.env.VITE_BACKEND_URL || 'http://localhost:5000';
 const API_BASE    = import.meta.env.VITE_BACKEND_URL || ''; 
 const SAMPLE_RATE = 16000;       // Hz — optimal for STT
-const SILENCE_MS       = 1000;    // 1.0s pause triggers send
-const MAX_CHUNK_MS     = 20000;   // 20s max recording cap
-const VAD_THRESHOLD    = 0.06;    // Very sensitive to capture all voices
-const MIN_AUDIO_BYTES  = 12000;   // Capture short words like 'Yes'
-const MIN_SPEECH_MS    = 600;     // 0.6s+ speech required
-const STREAM_INTERVAL_MS = 999999; 
+const SILENCE_MS       = 999999;  // Disable auto-splitting for single-bubble UX
+const MAX_CHUNK_MS     = 60000;   // 60s max recording cap
+const VAD_THRESHOLD    = 0.06;    // High sensitivity
+const MIN_AUDIO_BYTES  = 5000;    // Low floor for partials
+const MIN_SPEECH_MS    = 100;     // Low floor for partials
+const STREAM_INTERVAL_MS = 2000;   // Send chunks every 2s for background processing
 
 const LANG_LABELS = {
   en: 'English', 'en-IN': 'English',
@@ -283,7 +283,7 @@ const ActiveCall = () => {
   }, [id, role, inputLang]);
 
   // ── Send Audio Chunk to Backend ──────────────────────────────────────────────
-  const sendChunk = useCallback(async (pcmBuffer) => {
+  const sendChunk = useCallback(async (pcmBuffer, isFinal = true) => {
     if (pcmBuffer.length === 0) return;
 
     const inputSR  = audioContextRef.current?.sampleRate || 44100;
@@ -313,10 +313,11 @@ const ActiveCall = () => {
         body: JSON.stringify({
           sessionId:   id,
           role:        role,
-          clientId:    clientIdRef.current, // Send unique ID
+          clientId:    clientIdRef.current,
           audioBase64: base64,
           inputLang:   inputLang,
           outputLang:  targetLangRef.current,
+          isFinal:     isFinal, // Tell backend if this is the end of the thought
         }),
       });
 
@@ -422,11 +423,33 @@ const ActiveCall = () => {
             }
 
             if (isRecordingRef.current) {
-              const silence = Date.now() - lastSpeechTimeRef.current;
               const duration = Date.now() - (recordingStartRef.current || Date.now());
+              const timeSinceLastStream = Date.now() - lastStreamSentRef.current;
 
-              // ── END OF SENTENCE: send full buffer when silence detected OR max duration reached ──
-              if (silence > SILENCE_MS || duration > MAX_CHUNK_MS) {
+              // ── BACKGROUND STREAMING: Send partial chunks every 2s for zero-latency ──
+              if (timeSinceLastStream > STREAM_INTERVAL_MS) {
+                lastStreamSentRef.current = Date.now();
+                const buf = [...pcmDataRef.current];
+                // Note: we don't clear pcmDataRef here because Sarvam REST needs full context
+                if (buf.length > 1000) {
+                  console.log(`[VAD] ⚡ Background streaming (${buf.length} samples)`);
+                  sendChunk(buf, false); // isFinal = false
+                }
+              }
+
+              // ── MAX DURATION GUARD ──
+              if (duration > MAX_CHUNK_MS) {
+                isRecordingRef.current    = false;
+                recordingStartRef.current = null;
+                const buf = [...pcmDataRef.current];
+                pcmDataRef.current = [];
+                if (buf.length > 0) sendChunk(buf, true);
+              }
+
+              const silence = Date.now() - lastSpeechTimeRef.current;
+
+              // ── END OF SENTENCE: send full buffer when silence detected ──
+              if (silence > SILENCE_MS) {
                 const speechDuration = Date.now() - (recordingStartRef.current || Date.now());
                 isRecordingRef.current    = false;
                 recordingStartRef.current = null;

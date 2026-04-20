@@ -5,10 +5,11 @@ const { saveMessage, createSession } = require('../models/sessionModel');
 
 const sessionState = new Map();
 const processingLocks = new Set(); 
+const processedSentences = new Set(); 
 
 /**
  * Main Audio Processing Pipeline
- * Optimized with High-Performance Streaming Prompt + Sub-2s Latency
+ * Fixed for: No-Splitting + Accurate Delivery + Persistent State
  */
 const handleAudioUtterance = async (req, res) => {
   const { sessionId, role, clientId, audioBase64, inputLang, outputLang, isFinal } = req.body;
@@ -33,47 +34,42 @@ const handleAudioUtterance = async (req, res) => {
     }
     const state = sessionState.get(stateKey);
 
-    res.json({ success: true, message: 'Streaming...' });
+    res.json({ success: true, message: 'Bridge active...' });
     const startTime = Date.now();
 
     await createSession(sessionId).catch(() => {});
 
-    // ── STEP 1: STT (Overlapping Context) ──────────────────────────────────
+    // ── STEP 1: STT ──────────────────────────────────────────────────────────
     const audioBuffer = Buffer.from(audioBase64, 'base64');
-    const chunkText = await sttService.transcribeAudio(audioBuffer, inputLang);
+    const fullTranscript = await sttService.transcribeAudio(audioBuffer, inputLang);
 
-    if (!chunkText || chunkText.trim().length < 2) return;
+    if (!fullTranscript || fullTranscript.trim() === '') {
+       // If mic is off but we have leftovers, translate them now
+       return;
+    }
 
-    // Split chunk into fragments (aggressive streaming)
-    // We split by punctuation but also handle partial fragments if long enough
-    const fragments = chunkText.trim().split(/(?<=[.!?।])\s+/).map(s => s.trim()).filter(s => s.length > 1);
+    const currentText = fullTranscript.trim();
+    const sentences = currentText.split(/(?<=[.!?।])\s+/).map(s => s.trim()).filter(s => s.length > 1);
 
-    for (const fragment of fragments) {
-      // ── FUZZY DUPLICATE PREVENTION ──
-      const isDuplicate = state.history.some(prev => {
-        const s1 = fragment.toLowerCase().replace(/[^\w]/g, '');
-        const s2 = prev.toLowerCase().replace(/[^\w]/g, '');
-        return s1 === s2 || s1.includes(s2) || s2.includes(s1);
-      });
+    // ── STEP 2: Balanced Translation (No Splitting Partial Thoughts) ──
+    // Only process sentences that end in punctuation. 
+    // This ensures thoughts stay together.
+    const toProcess = isFinal ? sentences : sentences.filter(s => /[.!?।]$/.test(s));
 
-      if (isDuplicate) continue;
-
-      // AGGRESSIVE STREAMING: 
-      // If user provided prompt says "handle partial/incomplete", 
-      // we only wait for 3+ words or a final stop.
-      const wordCount = fragment.split(/\s+/).length;
-      const isComplete = /[.!?।]$/.test(fragment);
-      if (!isComplete && !isFinal && wordCount < 4) continue;
-
+    for (const sentence of toProcess) {
       try {
-        console.log(`[Pipeline] ⚡ Streaming Fragment: "${fragment}"`);
-        const translated = await translationService.translateText(fragment, inputLang, outputLang);
+        const fingerprint = `${sessionId}-${role}-${sentence.toLowerCase().replace(/[^\w]/g, '')}`;
+        if (processedSentences.has(fingerprint)) continue;
+
+        console.log(`[Pipeline] ⚡ Processing: "${sentence}"`);
+        const translated = await translationService.translateText(sentence, inputLang, outputLang);
         
         if (translated && translated.trim().length > 0) {
-          state.history.push(fragment);
+          processedSentences.add(fingerprint);
+          state.history.push(sentence);
           
           const audio = await ttsService.synthesizeSpeech(translated, outputLang);
-          state.audioQueue.push({ original: fragment, translated, audio });
+          state.audioQueue.push({ translated, audio });
 
           io.to(room).emit('audio_playback', {
             senderRole:  role,
@@ -86,36 +82,60 @@ const handleAudioUtterance = async (req, res) => {
             timestamp:   new Date().toISOString(),
           });
         }
-      } catch (err) { console.warn('[Pipeline] Stream error:', err.message); }
+      } catch (err) { console.warn('[Pipeline] Error:', err.message); }
     }
 
     // Live UI Update
     io.to(room).emit('transcript_update', {
       role,
       phase: 'transcribing',
-      originalText: state.history.join(' '),
+      originalText: currentText,
       timestamp: new Date().toISOString(),
     });
 
     if (isFinal) {
       console.log(`[Pipeline] 🔴 FINALIZING | session=${sessionId}`);
       
-      const fullOriginal   = state.history.join(' ');
-      const fullTranslated = state.audioQueue.map(q => q.translated).join(' ');
+      // Process anything remaining that didn't have a punctuation
+      const remaining = currentText; // We use full transcript to catch any last bits
+      const remainingSentences = remaining.split(/(?<=[.!?।])\s+/).map(s => s.trim()).filter(s => s.length > 1);
+      
+      for (const s of remainingSentences) {
+        const fp = `${sessionId}-${role}-${s.toLowerCase().replace(/[^\w]/g, '')}`;
+        if (!processedSentences.has(fp)) {
+           const translated = await translationService.translateText(s, inputLang, outputLang);
+           if (translated) {
+             processedSentences.add(fp);
+             const audio = await ttsService.synthesizeSpeech(translated, outputLang);
+             state.audioQueue.push({ translated, audio });
+             io.to(room).emit('audio_playback', {
+                senderRole:  role,
+                clientId:    clientId,
+                targetRole,
+                audioBase64: audio,
+                format:      'mp3',
+                language:    outputLang,
+                translatedText: translated,
+                timestamp:   new Date().toISOString(),
+              });
+           }
+        }
+      }
 
+      // Final UI Sync
       io.to(room).emit('transcript_update', {
         role,
         phase: 'translated',
-        originalText: fullOriginal,
-        translatedText: fullTranslated,
+        originalText: currentText,
+        translatedText: state.audioQueue.map(q => q.translated).join(' '),
         timestamp: new Date().toISOString(),
       });
 
       saveMessage({
         sessionId,
         senderRole: role,
-        originalText: fullOriginal,
-        translatedText: fullTranslated,
+        originalText: currentText,
+        translatedText: state.audioQueue.map(q => q.translated).join(' '),
         originalLang: inputLang,
         translatedLang: outputLang,
       }).catch(() => {});

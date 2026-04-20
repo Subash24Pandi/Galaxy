@@ -432,17 +432,16 @@ const ActiveCall = () => {
                 const duration = Date.now() - (recordingStartRef.current || Date.now());
                 const timeSinceLastStream = Date.now() - lastStreamSentRef.current;
                 
-              // ── OVERLAPPING CONTEXT STREAMING (For <1s Latency + 100% Accuracy) ──
-              if (timeSinceLastStream > 1000) { 
+              // ── SENSIBLE STREAMING (Context + Accuracy, No Splitting) ──
+              if (timeSinceLastStream > 1500) { 
                 lastStreamSentRef.current = Date.now();
                 
-                // Get the last 4 seconds of audio for context
-                // 16000 samples per second * 4 = 64000 samples
-                const contextSize = 64000;
+                // Keep the last 5 seconds for perfect context
+                const contextSize = 16000 * 5; 
                 const buf = pcmDataRef.current.slice(-contextSize);
                 
-                if (buf.length > 1000) {
-                  console.log(`[VAD] ⚡ Overlapping stream (${buf.length} samples)`);
+                if (buf.length > 2000) {
+                  console.log(`[VAD] ⚡ Streaming for translation (${buf.length} samples)`);
                   sendChunk(buf, false); 
                 }
               }

@@ -266,25 +266,21 @@ const ActiveCall = () => {
       }
     };
 
-    const playbackBufferRef = { current: [] };
-
+    // ── Optimized Audio Playback ──
     socket.on('audio_playback', (data) => {
+      // Perfect loop prevention: don't play our own audio back to us
       if (data.clientId === clientIdRef.current) return;
       if (!data.audioBase64) return;
-      if (data.bufferOnly) {
-        playbackBufferRef.current.push(data.audioBase64);
-      } else {
-        audioQueueRef.current.push(data.audioBase64);
-        playNextInQueue();
-      }
-    });
 
-    socket.on('audio_command', (data) => {
-      if (data.command === 'START_PLAYBACK' && data.senderRole !== role) {
-        audioQueueRef.current.push(...playbackBufferRef.current);
-        playbackBufferRef.current = [];
-        playNextInQueue();
+      console.log(`[Playback] 🔊 Received audio: ${data.translatedText.substring(0, 30)}...`);
+      audioQueueRef.current.push(data.audioBase64);
+      
+      // Auto-resume AudioContext on first playback (crucial for mobile)
+      if (audioContextRef.current?.state === 'suspended') {
+        audioContextRef.current.resume();
       }
+      
+      playNextInQueue();
     });
 
     return () => {
@@ -434,10 +430,8 @@ const ActiveCall = () => {
 
             if (isRecordingRef.current) {
               const duration = Date.now() - (recordingStartRef.current || Date.now());
-              const timeSinceLastStream = Date.now() - lastStreamSentRef.current;
-
-              // ── BACKGROUND STREAMING: Send full buffer for maximum context ──
-              if (timeSinceLastStream > STREAM_INTERVAL_MS) {
+              // ── BACKGROUND STREAMING: Send chunks every 1s for ultra-low latency ──
+              if (timeSinceLastStream > 1000) { 
                 lastStreamSentRef.current = Date.now();
                 const buf = [...pcmDataRef.current];
                 

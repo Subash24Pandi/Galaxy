@@ -8,7 +8,7 @@ const processingLocks = new Set();
 
 /**
  * Main Audio Processing Pipeline
- * Optimized for "No Splitting" + "Full Context" + "Instant Mic Off Playback"
+ * Optimized for: Sub-1s Latency + Mobile Compatibility + Real-time Streaming
  */
 const handleAudioUtterance = async (req, res) => {
   const { sessionId, role, clientId, audioBase64, inputLang, outputLang, isFinal } = req.body;
@@ -44,31 +44,28 @@ const handleAudioUtterance = async (req, res) => {
 
     if (!fullTranscript || fullTranscript.trim() === '') return;
 
-    // Find NEW text by stripping what we already processed
     const currentText = fullTranscript.trim();
     const newText = currentText.slice(state.processedText.length).trim();
 
     if (newText.length > 0) {
-      // ── STEP 2: Incremental Synthesis ────────────────────────────────────
+      // ── STEP 2: Real-time Synthesis ────────────────────────────────────
       const sentences = newText.split(/(?<=[.!?।])\s+/).map(s => s.trim()).filter(s => s.length > 1);
       
-      // Background mode: only process sentences that end in punctuation
-      // Final mode: process EVERYTHING remaining
+      // Process sentences as they are detected (No more bufferOnly=true)
       const toProcess = isFinal ? sentences : sentences.filter(s => /[.!?।]$/.test(s));
 
       for (const sentence of toProcess) {
         try {
-          // Double-check to avoid reprocessing if Sarvam slightly changed the previous text
           if (state.processedText.includes(sentence)) continue;
 
-          console.log(`[Pipeline] ⚡ Pre-synthesizing: "${sentence}"`);
+          console.log(`[Pipeline] ⚡ Real-time Synthesis: "${sentence}"`);
           const translated = await translationService.translateText(sentence, inputLang, outputLang);
           if (translated) {
             const audio = await ttsService.synthesizeSpeech(translated, outputLang);
             state.audioQueue.push({ translated, audio });
             state.processedText += (state.processedText ? ' ' : '') + sentence;
 
-            // Emit to client for buffering
+            // Emit to client for IMMEDIATE playback (Fastest possible delivery)
             io.to(room).emit('audio_playback', {
               senderRole:  role,
               clientId:    clientId,
@@ -77,14 +74,13 @@ const handleAudioUtterance = async (req, res) => {
               format:      'mp3',
               language:    outputLang,
               translatedText: translated,
-              bufferOnly:  true,
               timestamp:   new Date().toISOString(),
             });
           }
         } catch (err) { console.warn('[Pipeline] Synth error:', err.message); }
       }
 
-      // Update UI (Single growing bubble)
+      // Live transcript update
       io.to(room).emit('transcript_update', {
         role,
         phase: 'transcribing',
@@ -113,15 +109,11 @@ const handleAudioUtterance = async (req, res) => {
               format:      'mp3',
               language:    outputLang,
               translatedText: translated,
-              bufferOnly:  false, // Play immediately
               timestamp:   new Date().toISOString(),
             });
           }
         } catch (err) { console.warn('[Pipeline] Final bit error:', err.message); }
       }
-
-      // Start the buffered audio immediately
-      io.to(room).emit('audio_command', { command: 'START_PLAYBACK', senderRole: role });
 
       // Final UI Update
       io.to(room).emit('transcript_update', {

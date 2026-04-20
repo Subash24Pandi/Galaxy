@@ -428,10 +428,12 @@ const ActiveCall = () => {
               }
             }
 
-            if (isRecordingRef.current) {
-              const duration = Date.now() - (recordingStartRef.current || Date.now());
-              // ── BACKGROUND STREAMING: Send chunks every 1s for ultra-low latency ──
-              if (timeSinceLastStream > 1000) { 
+              if (isRecordingRef.current) {
+                const duration = Date.now() - (recordingStartRef.current || Date.now());
+                const timeSinceLastStream = Date.now() - lastStreamSentRef.current;
+                
+                // ── BACKGROUND STREAMING: Send chunks every 1s for ultra-low latency ──
+                if (timeSinceLastStream > 1000) { 
                 lastStreamSentRef.current = Date.now();
                 const buf = [...pcmDataRef.current];
                 
